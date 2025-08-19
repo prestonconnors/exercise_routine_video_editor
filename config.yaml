@@ -1,0 +1,48 @@
+# ---------------------------------------------------------------------------
+# Visual Configuration for the Exercise Routine Video Editor
+# ---------------------------------------------------------------------------
+
+# --- Safe Margins ---
+# The percentage of the screen to use as a buffer from the edges.
+safe_margins:
+  horizontal_percent: 5
+  vertical_percent: 5
+
+# --- Global Font and Color Settings ---
+# This font is used as a fallback if a specific element doesn't have one defined.
+font_file: 'C:/Windows/Fonts/arialbd.ttf'
+font_color: 'white'
+stroke_color: 'black'
+
+# --- Exercise Name (Top-Left) ---
+exercise_name:
+  font_file: 'C:/Windows/Fonts/arialbd.ttf' # Specific font for this element
+  position: ['left', 'top']
+  font_size: 60
+  stroke_width: 2
+  margin: 15
+
+# --- Countdown Timer (Top-Right) ---
+countdown_timer:
+  font_file: 'C:/Windows/Fonts/arialbd.ttf' # Specific font for the timer
+  position: ['right', 'top']
+  font_size: 120
+  stroke_width: 4
+  background_color: 'black'
+
+# --- Progress Bar (Bottom) ---
+progress_bar:
+  position: ['center', 'bottom']
+  height: 15
+  foreground_color: [255, 165, 0, 255] # Orange, RGBA
+  background_color: [50, 50, 50, 255]  # Dark Grey, RGBA
+
+# --- "Next Up" Picture-in-Picture (Bottom-Right) ---
+next_up_preview:
+  position: ['right', 'bottom']
+  show_before_end_seconds: 10
+  scale: 0.25
+  text:
+    font_file: 'C:/Windows/Fonts/arial.ttf' # Specific font for the "Next Up" text
+    font_size: 30
+    stroke_width: 1
