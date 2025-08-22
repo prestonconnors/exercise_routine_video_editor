@@ -5,8 +5,9 @@ from math import floor
 import os
 import argparse
 import numpy as np
+import random
 
-# Pillow is used for the fast progress bar and reliable text drawing
+# Pillow is now used for all our complex drawing/measuring
 from PIL import Image, ImageDraw, ImageFont
 
 from moviepy import (
@@ -64,23 +65,26 @@ def create_workout_video(yaml_file, input_video_file, output_video_file, config_
     processed_clips = []
     current_time = 0.0
 
-    # --- Countdown Timer Setup ---
+    # --- Countdown Timer Setup (remains the same) ---
     cfg_timer = config['countdown_timer']
-    # Use the specific timer font, or fall back to the global font
     countdown_font_file = cfg_timer.get('font_file', config['font_file'])
-    
-    dummy_countdown_clip = TextClip(
+    dummy_text_clip = TextClip(
         text="00", font=countdown_font_file, font_size=cfg_timer['font_size'], 
         color=config['font_color'], stroke_color=config['stroke_color'], 
         stroke_width=cfg_timer['stroke_width']
     )
-    countdown_size = dummy_countdown_clip.size
+    text_size = dummy_text_clip.size
+    padding_percent = cfg_timer.get('background_padding_percent', 0)
+    scale_factor = 1 + (padding_percent / 100)
+    max_text_dim = max(text_size)
+    canvas_side_length = int(max_text_dim * scale_factor)
+    countdown_canvas_size = (canvas_side_length, canvas_side_length)
     
     try:
-        pillow_font = ImageFont.truetype(countdown_font_file, cfg_timer['font_size'])
+        pillow_font_timer = ImageFont.truetype(countdown_font_file, cfg_timer['font_size'])
     except IOError:
         print(f"Font not found at {countdown_font_file}, using default.")
-        pillow_font = ImageFont.load_default()
+        pillow_font_timer = ImageFont.load_default()
 
     for i, exercise in enumerate(workout_plan):
         print(f"Processing clip {i+1}/{len(workout_plan)}: {exercise['name']} ({exercise.get('length', 0)}s)")
@@ -92,63 +96,114 @@ def create_workout_video(yaml_file, input_video_file, output_video_file, config_
         video_subclip = base_video.subclipped(start_time, end_time)
         clips_to_composite = [video_subclip]
 
-        # --- Create and Position Exercise Name ---
+        # ==========================================================
+        # FINAL FIX: Re-architect the Exercise Name to use Pillow for drawing,
+        # completely bypassing the buggy TextClip sizing.
+        # ==========================================================
         cfg_ex_name = config['exercise_name']
-        # Use the specific font, or fall back to the global font
-        ex_name_font = cfg_ex_name.get('font_file', config['font_file'])
-        exercise_name_text = TextClip(
-            text=exercise['name'].upper(), font=ex_name_font, font_size=cfg_ex_name['font_size'], 
-            color=config['font_color'], stroke_color=config['stroke_color'], 
-            stroke_width=cfg_ex_name['stroke_width'], margin=(cfg_ex_name['margin'], cfg_ex_name['margin'])
+        ex_name_font_file = cfg_ex_name.get('font_file', config['font_file'])
+        ex_name_text_str = exercise['name'].upper()
+        
+        try:
+            pillow_font_ex = ImageFont.truetype(ex_name_font_file, cfg_ex_name['font_size'])
+        except IOError:
+            pillow_font_ex = ImageFont.load_default()
+        
+        # Step 1: Accurately measure text with Pillow
+        temp_draw = ImageDraw.Draw(Image.new('RGB', (1, 1)))
+        text_bbox = temp_draw.textbbox((0, 0), ex_name_text_str, font=pillow_font_ex, stroke_width=cfg_ex_name['stroke_width'])
+        text_width = text_bbox[2] - text_bbox[0]
+        text_height = text_bbox[3] - text_bbox[1]
+
+        # Step 2: Calculate padded background size based on accurate measurements
+        padding_percent_ex = cfg_ex_name.get('background_padding_percent', 0)
+        scale_factor_ex = 1 + (padding_percent_ex / 100)
+        bg_size = (int(text_width * scale_factor_ex), int(text_height * scale_factor_ex))
+        
+        # Step 3: Draw the text and background onto a Pillow canvas
+        ex_bg_r, ex_bg_g, ex_bg_b = [random.randint(50, 200) for _ in range(3)]
+        ex_bg_color = (ex_bg_r, ex_bg_g, ex_bg_b, 128) # 50% opacity
+        
+        canvas = Image.new('RGBA', bg_size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(canvas)
+        draw.rectangle([(0, 0), bg_size], fill=ex_bg_color)
+        
+        center_x = bg_size[0] / 2
+        center_y = bg_size[1] / 2
+        draw.text(
+            (center_x, center_y), ex_name_text_str, font=pillow_font_ex, anchor="mm",
+            fill=config['font_color'], stroke_width=cfg_ex_name['stroke_width'],
+            stroke_fill=config['stroke_color']
         )
-        ex_name_pos = calculate_safe_position(base_video.size, exercise_name_text.size, cfg_ex_name['position'], config['safe_margins'])
-        clips_to_composite.append(exercise_name_text.with_position(ex_name_pos).with_duration(video_subclip.duration))
+        
+        # Step 4: Convert the final Pillow image to a MoviePy clip
+        exercise_name_frame = np.array(canvas)
+        exercise_name_clip = ImageClip(exercise_name_frame)
+        
+        # Step 5: Position the final, correctly-sized clip
+        ex_name_pos = calculate_safe_position(base_video.size, exercise_name_clip.size, cfg_ex_name['position'], config['safe_margins'])
+        clips_to_composite.append(exercise_name_clip.with_position(ex_name_pos).with_duration(video_subclip.duration))
 
         # --- Create and Position Countdown Timer ---
-        def make_countdown_frame(t, subclip_duration=video_subclip.duration):
+        bg_r, bg_g, bg_b = [random.randint(50, 200) for _ in range(3)]
+        circle_bg_color = (bg_r, bg_g, bg_b, 128)
+
+        while True:
+            prog_r, prog_g, prog_b = [random.randint(50, 220) for _ in range(3)]
+            if (prog_r, prog_g, prog_b) != (bg_r, bg_g, bg_b):
+                break
+        progress_circle_color = (prog_r, prog_g, prog_b, 255)
+
+        def make_countdown_frame(t, subclip_duration=video_subclip.duration, bg_color=circle_bg_color, prog_color=progress_circle_color):
             time_left = max(0, floor(subclip_duration - t))
             text_to_draw = str(time_left)
-            canvas = Image.new('RGB', countdown_size, cfg_timer['background_color'])
+            canvas = Image.new('RGBA', countdown_canvas_size, (0, 0, 0, 0))
             draw = ImageDraw.Draw(canvas)
-            center_x = countdown_size[0] / 2
-            center_y = countdown_size[1] / 2
+            draw.ellipse([(0, 0), countdown_canvas_size], fill=bg_color)
+            
+            cfg_progress = cfg_timer.get('progress_circle', {})
+            progress_width = cfg_progress.get('width', 10)
+            time_remaining_percent = (subclip_duration - t) / subclip_duration
+            start_angle = -90
+            end_angle = start_angle - (360 * time_remaining_percent)
+            inset = progress_width / 2
+            arc_box = [(inset, inset), (countdown_canvas_size[0] - inset, countdown_canvas_size[1] - inset)]
+
+            if time_remaining_percent > 0.01:
+                draw.arc(arc_box, start=end_angle, end=start_angle, fill=prog_color, width=progress_width)
+            
+            center_x = countdown_canvas_size[0] / 2
+            center_y = countdown_canvas_size[1] / 2
             draw.text(
-                (center_x, center_y), text_to_draw, font=pillow_font, anchor="mm",
+                (center_x, center_y), text_to_draw, font=pillow_font_timer, anchor="mm",
                 fill=config['font_color'], stroke_width=cfg_timer['stroke_width'],
                 stroke_fill=config['stroke_color']
             )
             return np.array(canvas)
 
-        countdown_pos = calculate_safe_position(base_video.size, countdown_size, cfg_timer['position'], config['safe_margins'])
+        countdown_pos = calculate_safe_position(base_video.size, countdown_canvas_size, cfg_timer['position'], config['safe_margins'])
         countdown_clip = VideoClip(make_countdown_frame, duration=video_subclip.duration).with_position(countdown_pos)
         clips_to_composite.append(countdown_clip)
         
-        # --- Create and Position Progress Bar ---
+        # ... (rest of the script is unchanged) ...
         if exercise.get('type') not in ['warmup', 'cool down', 'rest']:
             def make_progress_bar_frame(t, captured_start_time=start_time):
                 warmup_duration = workout_plan[0].get('length', 0) if workout_plan and workout_plan[0].get('type') == 'warmup' else 0
                 time_elapsed = captured_start_time + t - warmup_duration
                 progress = max(0, time_elapsed / total_workout_duration) if total_workout_duration > 0 else 0
-                
                 cfg_bar = config['progress_bar']
                 w, h = int(base_video.w), cfg_bar['height']
                 bar_w = int(w * progress)
-
                 bar_img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
                 draw = ImageDraw.Draw(bar_img)
                 draw.rectangle([(0, 0), (w, h)], fill=tuple(cfg_bar['background_color']))
                 draw.rectangle([(0, 0), (bar_w, h)], fill=tuple(cfg_bar['foreground_color']))
-                
                 return np.array(bar_img)
-
             cfg_bar = config['progress_bar']
             bar_size = (base_video.w, cfg_bar['height'])
             bar_pos = calculate_safe_position(base_video.size, bar_size, cfg_bar['position'], config['safe_margins'])
-            
             progress_bar_clip = VideoClip(make_progress_bar_frame, duration=video_subclip.duration).with_position(bar_pos)
             clips_to_composite.append(progress_bar_clip)
-            
-        # --- Create and Position "Next Up" Preview ---
         if i + 1 < len(workout_plan):
             next_exercise = workout_plan[i+1]
             if next_exercise['name'].lower() not in ['rest', 'cool down']:
@@ -156,9 +211,7 @@ def create_workout_video(yaml_file, input_video_file, output_video_file, config_
                 if next_start_time < base_video.duration:
                     cfg_pip = config['next_up_preview']
                     cfg_pip_text = cfg_pip['text']
-                    # Use the specific font, or fall back to the global font
                     pip_font = cfg_pip_text.get('font_file', config['font_file'])
-                    
                     preview_clip = base_video.subclipped(next_start_time, min(next_start_time + 5, base_video.duration)).with_fps(15)
                     pip_width = base_video.w * cfg_pip['scale']
                     preview_clip_resized = preview_clip.resized(width=pip_width)
@@ -170,14 +223,11 @@ def create_workout_video(yaml_file, input_video_file, output_video_file, config_
                     text_bg = ColorClip(size=(int(next_up_text.w * 1.1), int(next_up_text.h * 1.2)), color=(0,0,0)).with_opacity(0.6)
                     text_with_bg = CompositeVideoClip([text_bg, next_up_text.with_position('center')])
                     next_up_group = CompositeVideoClip([preview_clip_resized, text_with_bg.with_position(('center', 0.05), relative=True)], size=preview_clip_resized.size)
-                    
                     pip_pos = calculate_safe_position(base_video.size, next_up_group.size, cfg_pip['position'], config['safe_margins'])
-
                     base_pip = (next_up_group
                                  .with_start(max(0, video_subclip.duration - cfg_pip['show_before_end_seconds']))
                                  .with_duration(cfg_pip['show_before_end_seconds'])
                                  .with_position(pip_pos))
-                    
                     fade_mask = create_fade_mask(base_pip.duration, 0.5, base_pip.size)
                     next_up_pip = base_pip.with_mask(fade_mask)
                     clips_to_composite.append(next_up_pip)
