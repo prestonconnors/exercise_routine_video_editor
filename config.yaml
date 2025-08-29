@@ -1,54 +1,57 @@
-# ---------------------------------------------------------------------------
-# Visual Configuration for the Exercise Routine Video Editor
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------
+# MASTER CONFIG for Exercise Video Generation
+# -----------------------------------------------------------------
 
-# --- Safe Margins ---
-safe_margins:
-  horizontal_percent: 5
-  vertical_percent: 5
-
-# --- Global Font and Color Settings ---
-font_file: 'C:/Windows/Fonts/arialbd.ttf'
-font_color: 'white'
-stroke_color: 'black'
-
-# --- Exercise Name (Top-Left) ---
-exercise_name:
-  font_file: 'C:/Users/Preston Connors/AppData/Local/Microsoft/Windows/Fonts/Roboto-VariableFont_wdth,wght.ttf'
-  position: ['left', 'top']
-  font_size: 120
-  stroke_width: 2
-  # Increased padding for better visual balance and to prevent clipping.
-  background_padding_percent: 20
-
-# --- Countdown Timer (Top-Right) ---
-countdown_timer:
-  font_file: 'C:/Users/Preston Connors/AppData/Local/Microsoft/Windows/Fonts/Inter-VariableFont_opsz,wght.ttf'
-  position: ['right', 'top']
-  font_size: 120
-  stroke_width: 4
-  
-  # NEW: Percentage to increase the background circle size relative to the text.
-  background_padding_percent: 25
-
-  progress_circle:
-    width: 10 # The thickness of the progress bar in pixels
+# -- Section 1: Asset Paths --
+paths:
+  asset_output_dir: 'assets'
+  timers_subdir: 'timers'
+  # font_file has been moved to the specific sections below.
 
 
-# --- Progress Bar (Bottom) ---
-# ... (rest of the file is unchanged) ...
-progress_bar:
-  position: ['center', 'bottom']
-  height: 15
-  foreground_color: [255, 165, 0, 255] # Orange, RGBA
-  background_color: [50, 50, 50, 255]  # Dark Grey, RGBA
-
-# --- "Next Up" Picture-in-Picture (Bottom-Right) ---
-next_up_preview:
-  position: ['right', 'bottom']
-  show_before_end_seconds: 10
-  scale: 0.25
+# -- Section 2: Progress Ring Style --
+progress_ring:
+  fps: 60
+  direction: 'clockwise'
+  size: 400
+  stroke_width: 30
+  border_width: 3
+  no_text: false 
   text:
+    # Font specifically for the countdown number
+    font_file: 'C:/Users/Preston Connors/AppData/Local/Microsoft/Windows/Fonts/Inter-VariableFont_opsz,wght.ttf' # Example: A digital-style font
+    font_style: 'Bold' # Variable font style for the countdown
+    font_size_ratio: 0.4
+    stroke_width: 4
+    hide_on_zero: true
+    background_circle:
+      enabled: true
+    color: 'black@0.7'  # Same format as the exercise name box
+    padding: 0          # Extra radius (in pixels) around the text area
+
+
+# -- Section 3: Text Overlay Styles --
+text_overlays:
+  exercise_name:
+    # Font specifically for the exercise title card
     font_file: 'C:/Users/Preston Connors/AppData/Local/Microsoft/Windows/Fonts/Roboto-VariableFont_wdth,wght.ttf'
-    font_size: 30
-    stroke_width: 1
+    font_style: 'Bold' # Variable font style for the title
+    font_size: 80
+    font_color: 'white'
+    box_color: 'black@0.7'
+    box_border_width: 15
+    position_x: '(w-text_w)/2'
+    position_y: 'h*0.8'
+    wrap_at_char: 25
+    show_for_seconds: 5
+    show_from_second: 1
+    
+    
+# -- Section 4: Final Video Output Settings --
+video_output:
+  resolution: '3840x2160'
+  codec: 'h264_nvenc'
+  preset: 'p6'
+  quality: 19
+  audio_codec: 'aac'
+  audio_bitrate: '192k'

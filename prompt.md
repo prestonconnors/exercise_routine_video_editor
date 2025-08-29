@@ -1,60 +1,58 @@
-You are an expert Python developer specializing in robust, configurable video automation scripts.
+I need you to act as an expert Python developer and FFmpeg specialist. Your task is to create a complete, automated pipeline for generating styled exercise videos. The project should consist of two main Python scripts, a central YAML configuration file, and supporting documentation.
 
-Your task is to write a single, complete, self-contained Python script named `exercise_routine_video_editor.py` that automates the creation of workout videos. The script must be a command-line tool that takes a raw video file and a workout routine defined in a YAML file, and produces a final video with dynamic, professional overlays. The entire visual style of the overlays must be configurable via a separate YAML file.
+Here are the detailed requirements for each component:
 
-### Core Libraries
--   `moviepy` for all video manipulation.
--   `PyYAML` to parse the input YAML files.
--   `Pillow` (PIL) for all dynamic frame generation (countdown timer, progress bar, and exercise name background) to ensure performance and reliability.
--   `argparse` for command-line argument parsing.
--   `numpy` for frame manipulation.
--   `os` for detecting CPU count.
--   `random` for color generation.
+### 1. `config.yaml`
 
-### Input Files
+This file must be the single source of truth for all styling and configuration. It should be well-structured and include sections for:
+- **Paths:** Asset output directories.
+- **Progress Ring Style:** All settings for the animated timer, including its size, colors, stroke widths, and font settings.
+- **Text Overlay Styles:** Settings for the exercise name titles, including font, size, color, background box style, and on-screen position.
+- **Video Output:** Final video resolution, codec (e.g., `h264_nvenc`), quality, and audio settings.
 
-1.  **Workout Routine YAML**: A list of dictionaries, each with a `name`, `length` (in seconds), and optional `type` (e.g., 'warmup', 'rest').
-2.  **Visual Configuration YAML (`config.yaml`)**: A dictionary defining the entire visual style. It must contain the following sections and keys:
-    -   `safe_margins`: `horizontal_percent` and `vertical_percent` to keep elements away from screen edges.
-    -   `font_file`, `font_color`, `stroke_color`: Global defaults.
-    -   `exercise_name`: `position`, `font_size`, `stroke_width`, and `background_padding_percent`. It can override `font_file`.
-    -   `countdown_timer`: `position`, `font_size`, `stroke_width`, `background_padding_percent`, and a `progress_circle` with a `width`. It can override `font_file`.
-    -   `progress_bar`: `position`, `height`, `foreground_color`, and `background_color`.
-    -   `next_up_preview`: `position`, `show_before_end_seconds`, `scale`, and a `text` subsection with `font_size`, `stroke_width`, and an optional `font_file`.
+Crucially, allow for a *different font file* to be specified for the progress ring text vs. the exercise name text.
 
-### Script Functionality
+### 2. `create_progress_ring.py`
 
-1.  **Command-Line Interface:** The script must use `argparse` to accept the following arguments:
-    -   `-y, --yaml`: Required path to the workout routine YAML.
-    -   `-i, --input`: Required path to the input raw video file.
-    -   `-o, --output`: Required path for the final output video.
-    -   `-c, --config`: Optional path to the visual config YAML (defaults to `config.yaml`).
-    -   `-t, --test`: Optional flag (`action='store_true'`) for a fast, low-quality, silent, 480p, 15fps render.
-    -   `--gpu`: Optional flag (`action='store_true'`) to attempt GPU-accelerated encoding.
+This script's purpose is to generate high-quality, reusable animated timer assets.
+- **Input:** It should take a single command-line argument: `duration` (in seconds).
+- **Configuration:** It must read all styling and animation parameters from the `config.yaml` file.
 
-2.  **Overlay Logic:**
-    -   **Safe Margins:** Implement a helper function `calculate_safe_position` that takes an asset's size and position strings (e.g., `['left', 'top']`) and returns the correct `(x, y)` coordinate based on the `safe_margins` from the config file.
-    -   **Exercise Name:**
-        -   For each exercise, generate a new random, semi-transparent background color.
-        -   **Crucially, use Pillow to accurately measure the text's true bounding box.**
-        -   Create a background box whose size is based on the text's measured size plus the `background_padding_percent`.
-        -   Use Pillow to draw the background and the perfectly centered text onto a canvas.
-        -   Convert this canvas to a MoviePy `ImageClip` and position it using the safe margin function.
-    -   **Countdown Timer:**
-        -   This must be a **perfect circle**. The size of the circle should be a square whose side is based on the longest dimension of the text "00" plus the `background_padding_percent`.
-        -   For each exercise, generate two different random colors: one for the semi-transparent background circle and one for the fully opaque progress arc.
-        -   The background must be a semi-transparent colored circle.
-        -   It must have a depleting circular progress bar around its border that drains **counter-clockwise**.
-        -   The countdown number must be perfectly centered (horizontally and vertically) within the circle.
-        -   **This entire element must be drawn using Pillow on every frame** to ensure perfect alignment and bypass MoviePy's `TextClip` bugs.
-    -   **Progress Bar:** This should track the total duration of only the main workout exercises (not warmup, rest, etc.). It should be drawn efficiently using Pillow.
-    -   **Next Up Preview**: A scaled-down subclip of the next exercise that fades in and out during the final seconds of the current exercise. The fade effect must be implemented reliably using a custom mask.
+**Functional Requirements:**
+1.  **Generate Frames:** It must programmatically generate a sequence of PNG frames for the animation using the Pillow library.
+2.  **FFmpeg Integration:** After generating the frames, it must automatically call FFmpeg to compile the PNG sequence into a single video file (`prores_aw` with `yuva444p10le` pixel format for alpha transparency).
+3.  **Cleanup:** After the video is successfully created, the script must automatically delete the temporary PNG frame folder.
+4.  **Performance:** The frame generation loop must be highly performant, using an "incremental drawing" method on a persistent canvas to avoid slowdowns on longer durations.
 
-3.  **Performance:**
-    -   The script must automatically use all available CPU cores (`os.cpu_count()`) for encoding.
-    -   The `--gpu` flag should make the script attempt to use the `h264_nvenc` codec. It must use different `preset` values for GPU (`p1`, `p4`) vs. CPU (`ultrafast`, `medium`) and handle potential rendering errors by falling back to the CPU.
+**Visual Requirements for the Animation:**
+- The timer must be a circular progress ring that fills up over the specified duration.
+- The ring's color should be a gradient, starting with a random color and smoothly transitioning to pure white at the end.
+- The ring must have a configurable black border on both its inside and outside edges, with no gaps.
+- A numerical countdown (e.g., "10", "9", "8") should be displayed in the center. The number "0" should not be shown; the number should disappear after "1".
+- The countdown number must have a configurable black stroke/outline for legibility.
+- Behind the number, there must be a semi-transparent, solid black circle background that is perfectly flush with the inner edge of the progress ring.
 
-4.  **Code Quality:**
-    -   The script must be well-commented and organized into logical functions.
-    -   All file and resource handling should be robust (e.g., check if files exist, close video clips).
-    -   It must be contained within a single Python file with a `if __name__ == "__main__":` block.
+### 3. `assemble_video.py`
+
+This is the main orchestration script that builds the final video.
+- **Input:** It should take three command-line arguments: the path to the `routine.yaml` file, the path to the long source video file, and the path for the final output video.
+
+**Functional Requirements:**
+1.  **Read Inputs:** It must parse the `routine.yaml` (a list of exercises with `name` and `length`) and the `config.yaml`.
+2.  **Process Sequentially:** It should iterate through the routine and process the source video in segments.
+3.  **For Each Segment, It Must:**
+    - Trim the source video to the correct start time and duration.
+    - Overlay the correct pre-generated timer asset (e.g., `timer_45s.mov`) that was created by the other script. The script should warn the user if a required timer asset is missing.
+    - Use FFmpeg's `drawtext` filter to burn the exercise name directly onto the video.
+    - The `drawtext` styling (font, size, background box, position) must come from `config.yaml`.
+    - The exercise name should automatically wrap if it's too long.
+    - The name should only appear on screen for a configured duration (e.g., the first 5 seconds of the segment).
+4.  **Final Assembly:** After all segments are processed as temporary video files, the script must concatenate them in the correct order into a single, final output video file.
+5.  **Cleanup:** The script must delete all temporary segment files.
+6.  **Error Handling:** The script must provide robust error reporting. If any FFmpeg command fails, the script should terminate and print the full, detailed error message from FFmpeg's stderr to the console.
+
+### 4. Documentation
+
+Please provide:
+- A `requirements.txt` file listing the necessary Python libraries (`PyYAML` and `Pillow`).
+- A `README.md` file explaining the project's purpose, file structure, setup instructions, and a detailed step-by-step workflow for a user.

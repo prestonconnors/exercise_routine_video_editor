@@ -1,150 +1,99 @@
-# Workout Video Automation Script
+# Automated Exercise Video Generator
 
-This project provides a powerful Python script to automate the creation of workout videos. It takes a raw video file and a YAML-based workout routine, and automatically adds professional, dynamic overlays such as timers, exercise titles, and progress bars. The entire visual style is configurable through a separate YAML file, allowing for easy customization without touching the code.
+This project is a Python-based pipeline for automatically creating styled exercise videos with dynamic overlays. It uses a series of configuration files and scripts to combine a single long video recording with animated timers and title cards, producing a final, edited video ready for platforms like YouTube.
+
+The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via a central `config.yaml` file, making it incredibly flexible and efficient.
 
 ## Features
 
--   **Dynamic Overlays**: Automatically adds the current exercise name, a countdown timer for each exercise, and a progress bar for the entire workout.
--   **"Next Up" Preview**: Displays a picture-in-picture video of the next exercise in the final seconds of the current one.
--   **Highly Configurable**: All visual elements, including fonts, colors, sizes, positions, and safe margins, are controlled via a clean `config.yaml` file.
--   **Dynamic Backgrounds**: The countdown timer and exercise name backgrounds are randomly colored for each exercise, with configurable transparency.
--   **Performance Modes**: Includes a `--test` flag for extremely fast, low-quality renders and a `--gpu` flag to attempt hardware-accelerated encoding (NVIDIA NVENC).
--   **Robust and Optimized**: Uses efficient libraries like Pillow for drawing dynamic elements to ensure fast performance and avoid common rendering bugs.
+- **YAML Configuration:** All styling (colors, fonts, sizes, borders) is controlled in a single `config.yaml` file for easy theme changes.
+- **Routine Planning:** Video structure is defined in a simple `routine.yaml` file, listing exercises and their durations.
+- **Automated Asset Generation:** A script (`create_progress_ring.py`) automatically generates high-quality, reusable animated timer assets.
+- **Dynamic Overlays:** The main script (`assemble_video.py`) automatically composites timers and burns in exercise titles for each segment.
+- **High Performance:** The timer generation script is optimized to be extremely fast, and the assembly script uses GPU-accelerated FFmpeg commands where possible.
+- **Professional Formats:** Timer assets are created in ProRes 4444 with a transparent alpha channel for high-quality compositing.
 
-## Prerequisites
+## Project Structure
 
-Before you begin, you must have the following software installed and available in your system's PATH.
+Your project folder should be set up like this for the scripts to work correctly:
 
-1.  **Python 3.8+**: [Download Python](https://www.python.org/downloads/)
-2.  **FFmpeg**: This is the core engine for video processing.
-    -   **Windows**: Download a build from [Gyan.dev](https://www.gyan.dev/ffmpeg/builds/) and add the `bin` folder to your system's PATH.
-3.  **ImageMagick**: This is required for reliable text rendering in MoviePy.
-    -   **Windows**: Download and install from the [official website](https://imagemagick.org/script/download.php#windows). **Crucially, during installation, you must check the box that says "Add application directory to your system path".**
+```
+.
+├── assets/
+│   └── timers/
+│       ├── timer_45s.mov
+│       └── timer_53s.mov
+├── config.yaml
+├── create_progress_ring.py
+├── assemble_video.py
+├── routine.yaml
+├── requirements.txt
+└── README.md
+```
 
-You can verify your FFmpeg and ImageMagick installations by opening a **new** terminal and running `ffmpeg -version` and `magick -version`.
+## Setup
 
-## Installation
+### 1. Prerequisites
 
-1.  **Create a Project Folder** and place the `exercise_routine_video_editor.py` script inside it.
-2.  **Open a terminal** in your project folder.
-3.  **Create a Python virtual environment:**
-    ```bash
-    python -m venv venv
-    ```
-4.  **Activate the virtual environment:**
-    -   **Windows (PowerShell):** `.\venv\Scripts\activate`
-    -   **macOS/Linux:** `source venv/bin/activate`
-5.  **Install the required Python libraries:**
-    ```bash
-    pip install moviepy PyYAML numpy Pillow
-    ```
+- **Python 3.8+**
+- **FFmpeg:** You must have FFmpeg installed and accessible in your system's PATH. You can download it from [ffmpeg.org](https://ffmpeg.org/download.html). (The full build from [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) is recommended for Windows users).
+- An NVIDIA GPU is recommended to take advantage of `h264_nvenc` encoding for speed. If you don't have one, change the `codec` in `config.yaml` to `libx264`.
 
-## Configuration
+### 2. Install Python Dependencies
 
-The script is controlled by two YAML files: one for the workout routine and one for the visual style.
+In your terminal, navigate to the project folder and run:
+```bash
+pip install -r requirements.txt
+```
 
-### 1. The Workout Routine File (`workout.yaml`)
+## Workflow: How to Create a Video
 
-This file defines the sequence and duration of exercises.
+Follow these steps to create your final video.
 
-**Example:**
+### Step 1: Configure Your Style
+
+Open `config.yaml` and edit the settings to match your desired visual style. This is where you set fonts, colors, sizes, video resolution, and more. You generally only need to do this once.
+
+### Step 2: Define Your Routine
+
+Open or create a `routine.yaml` file. List each exercise or rest period with its `name` and `length` in seconds.
+
+**Example `routine.yaml`:**
 ```yaml
-- name: warmup
-  length: 45.0
-  type: warmup
-
-- name: Calf Raise
-  length: 53.0
-  type: compound
-
+- name: Warmup
+  length: 45
 - name: Plyo Pushup with Chest Tap
-  length: 53.0
-  type: compound
-
+  length: 53
 - name: rest
-  length: 60.0
-  type: rest
-
-# ... and so on
+  length: 60
 ```
 
-### 2. The Visual Style File (`config.yaml`)
+### Step 3: Generate Timer Assets
 
-This file controls the entire look and feel of the video overlays. You can create different style files and switch between them using the `--config` flag.
+The assembly script needs a pre-made timer video for each unique duration in your routine.
 
-**Example `config.yaml`:**
-```yaml
-# ---------------------------------------------------------------------------
-# Visual Configuration for the Exercise Routine Video Editor
-# ---------------------------------------------------------------------------
+1.  Look at your `routine.yaml` and find all unique `length` values (e.g., 45, 53, 60).
+2.  For each unique duration, run the `create_progress_ring.py` script. The script will automatically read your `config.yaml`, generate the animation, create a `.mov` file, and clean up after itself.
 
-# --- Safe Margins ---
-# The percentage of the screen to use as a buffer from the edges.
-safe_margins:
-  horizontal_percent: 5
-  vertical_percent: 5
-
-# --- Global Font and Color Settings ---
-font_file: 'C:/Windows/Fonts/arialbd.ttf'
-font_color: 'white'
-stroke_color: 'black'
-
-# --- Exercise Name (Top-Left) ---
-exercise_name:
-  font_file: 'C:/Users/Preston Connors/AppData/Local/Microsoft/Windows/Fonts/Roboto-VariableFont_wdth,wght.ttf'
-  position: ['left', 'top']
-  font_size: 120
-  stroke_width: 2
-  background_padding_percent: 20
-
-# --- Countdown Timer (Top-Right) ---
-countdown_timer:
-  font_file: 'C:/Users/Preston Connors/AppData/Local/Microsoft/Windows/Fonts/Inter-VariableFont_opsz,wght.ttf'
-  position: ['right', 'top']
-  font_size: 120
-  stroke_width: 4
-  background_padding_percent: 25
-  progress_circle:
-    width: 10
-
-# --- Progress Bar (Bottom) ---
-progress_bar:
-  position: ['center', 'bottom']
-  height: 15
-  foreground_color: # Orange, RGBA
-  background_color:  # Dark Grey, RGBA
-
-# --- "Next Up" Picture-in-Picture (Bottom-Right) ---
-next_up_preview:
-  position: ['right', 'bottom']
-  show_before_end_seconds: 10
-  scale: 0.25
-  text:
-    font_file: 'C:/Users/Preston Connors/AppData/Local/Microsoft/Windows/Fonts/Roboto-VariableFont_wdth,wght.ttf'
-    font_size: 30
-    stroke_width: 1
-```
-
-## Usage
-
-Run the script from your activated virtual environment.
-
-**Standard Quality Render (using CPU):**
+**Example Commands:**
 ```bash
-python .\exercise_routine_video_editor.py -y path/to/workout.yaml -i path/to/input.mp4 -o final_video.mp4
+python create_progress_ring.py 45
+python create_progress_ring.py 53
+python create_progress_ring.py 60
+```
+After running these commands, your `assets/timers/` folder will contain `timer_45s.mov`, `timer_53s.mov`, and `timer_60s.mov`.
+
+### Step 4: Assemble the Final Video
+
+Now, run the main assembly script. It requires three arguments: the path to your routine file, the path to your source video footage, and the desired path for the final output video.
+
+**Command Structure:**
+```bash
+python assemble_video.py <routine_file> <source_video> <output_video>
 ```
 
-**Fast Test Render (low-quality, silent):**
+**Example Command:**
 ```bash
-python .\exercise_routine_video_editor.py -y path/to/workout.yaml -i path/to/input.mp4 -o test_video.mp4 --test
+python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "final_video.mp4"
 ```
-
-**GPU-Accelerated Render (NVIDIA):**
-```bash
-python .\exercise_routine_video_editor.py -y path/to/workout.yaml -i path/to/input.mp4 -o gpu_video.mp4 --gpu
-```
-
-**Using a Custom Style File:**
-```bash
-python .\exercise_routine_video_editor.py -y routine.yaml -i video.mp4 -o dark_style.mp4 --config dark_style.yaml
-```
+The script will now process your video segment by segment and combine everything into the final `final_video.mp4`.
