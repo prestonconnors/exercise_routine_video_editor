@@ -5,54 +5,55 @@ Here are the detailed requirements for each component:
 ### 1. `config.yaml`
 
 This file must be the single source of truth for all styling and configuration. It should be well-structured and include sections for:
-- **Paths:** Asset output directories.
-- **Progress Ring Style:** All settings for the animated timer, including its size, colors, stroke widths, and font settings.
-- **Text Overlay Styles:** Settings for the exercise name titles, including font, size, color, background box style, and on-screen position.
-- **Video Output:** Final video resolution, codec (e.g., `h264_nvenc`), quality, and audio settings.
-
-Crucially, allow for a *different font file* to be specified for the progress ring text vs. the exercise name text.
+- **`paths`:** Directories for asset output.
+- **`source_video_processing`:** A section to control color grading, with an `apply_lut` boolean flag and a `lut_file` path for V-Log to Rec.709 conversion.
+- **`progress_ring`:** All settings for the animated timer, including a `position` block with `x` and `y` keys for FFmpeg expressions (e.g., `(W-w)/2`).
+- **`progress_ring.text`:** A sub-section for the countdown number, including a specific `font_file`, font style, a background circle with configurable color/padding, and a `hide_on_zero` flag.
+- **`text_overlays.exercise_name`:** Settings for the exercise name titles, including a specific `font_file`, `font_size`, background box style, character wrap width, and `position_x`/`position_y` keys for FFmpeg expressions.
+- **`video_output`:** Final video resolution, codec (e.g., `h264_nvenc`), quality, and audio settings.
 
 ### 2. `create_progress_ring.py`
 
 This script's purpose is to generate high-quality, reusable animated timer assets.
-- **Input:** It should take a single command-line argument: `duration` (in seconds).
-- **Configuration:** It must read all styling and animation parameters from the `config.yaml` file.
+- **Input:** It must take a single command-line argument: `duration` (in seconds).
+- **Configuration:** It must read all styling parameters from `config.yaml`.
 
 **Functional Requirements:**
-1.  **Generate Frames:** It must programmatically generate a sequence of PNG frames for the animation using the Pillow library.
-2.  **FFmpeg Integration:** After generating the frames, it must automatically call FFmpeg to compile the PNG sequence into a single video file (`prores_aw` with `yuva444p10le` pixel format for alpha transparency).
-3.  **Cleanup:** After the video is successfully created, the script must automatically delete the temporary PNG frame folder.
-4.  **Performance:** The frame generation loop must be highly performant, using an "incremental drawing" method on a persistent canvas to avoid slowdowns on longer durations.
+1.  **Generate Frames:** Programmatically generate PNG frames for the animation using the Pillow library.
+2.  **FFmpeg Integration:** Automatically call FFmpeg to compile the PNG sequence into a `prores_aw` video with `yuva444p10le` pixel format for alpha transparency.
+3.  **Cleanup:** Automatically delete the temporary PNG folder upon successful video creation.
+4.  **Performance:** The frame generation loop must be highly performant, using an "incremental drawing" method on a persistent canvas.
 
 **Visual Requirements for the Animation:**
-- The timer must be a circular progress ring that fills up over the specified duration.
-- The ring's color should be a gradient, starting with a random color and smoothly transitioning to pure white at the end.
-- The ring must have a configurable black border on both its inside and outside edges, with no gaps.
-- A numerical countdown (e.g., "10", "9", "8") should be displayed in the center. The number "0" should not be shown; the number should disappear after "1".
-- The countdown number must have a configurable black stroke/outline for legibility.
-- Behind the number, there must be a semi-transparent, solid black circle background that is perfectly flush with the inner edge of the progress ring.
+- It must be a circular progress ring that fills over time.
+- The color must be a gradient, starting with a random color and smoothly transitioning to white.
+- It must have a configurable black border on both the inside and outside edges with no gaps.
+- A numerical countdown must be displayed in the center. The number "0" must not be shown.
+- The countdown number must have a configurable black stroke/outline.
+- A semi-transparent, solid-colored background circle must sit behind the number, perfectly flush with the inner edge of the progress ring.
 
 ### 3. `assemble_video.py`
 
 This is the main orchestration script that builds the final video.
-- **Input:** It should take three command-line arguments: the path to the `routine.yaml` file, the path to the long source video file, and the path for the final output video.
+- **Input:** It must accept three positional arguments: `routine.yaml`, `source_video`, `output_video`.
+- **Optional Arguments:** It must accept optional flags: `--segments` (for partial renders), `--start` (to offset the start time in the source video), and `--end` (to cap the end time in the source video).
 
 **Functional Requirements:**
-1.  **Read Inputs:** It must parse the `routine.yaml` (a list of exercises with `name` and `length`) and the `config.yaml`.
-2.  **Process Sequentially:** It should iterate through the routine and process the source video in segments.
+1.  **Read Inputs:** It must parse the `routine.yaml` and `config.yaml`.
+2.  **Process Sequentially:** It must iterate through the routine, correctly calculating the timestamps for each segment, even when using a `--start` offset.
 3.  **For Each Segment, It Must:**
-    - Trim the source video to the correct start time and duration.
-    - Overlay the correct pre-generated timer asset (e.g., `timer_45s.mov`) that was created by the other script. The script should warn the user if a required timer asset is missing.
-    - Use FFmpeg's `drawtext` filter to burn the exercise name directly onto the video.
-    - The `drawtext` styling (font, size, background box, position) must come from `config.yaml`.
-    - The exercise name should automatically wrap if it's too long.
-    - The name should only appear on screen for a configured duration (e.g., the first 5 seconds of the segment).
-4.  **Final Assembly:** After all segments are processed as temporary video files, the script must concatenate them in the correct order into a single, final output video file.
+    - Conditionally apply the LUT and color transformation filter chain from `config.yaml` to the source video.
+    - Trim the source video to the correct calculated start and end times.
+    - Overlay the correct pre-generated timer asset. It must warn the user if a required timer is missing but not crash.
+    - Use FFmpeg's `drawtext` filter to burn in the exercise name, taking all style and position parameters from `config.yaml`.
+    - The exercise name must remain on screen for the full duration of the segment.
+4.  **Final Assembly:** If multiple segments are created, concatenate them. If only one segment is created, it should rename the temporary file instead of concatenating.
 5.  **Cleanup:** The script must delete all temporary segment files.
-6.  **Error Handling:** The script must provide robust error reporting. If any FFmpeg command fails, the script should terminate and print the full, detailed error message from FFmpeg's stderr to the console.
+6.  **User Feedback:** The script must provide verbose feedback in the console, indicating which segment is being processed and printing the time taken for each major step (encoding, concatenation, total).
+7.  **Error Handling:** If any FFmpeg command fails, the script must terminate and print the full, detailed error message from FFmpeg's stderr to the console.
 
 ### 4. Documentation
 
 Please provide:
-- A `requirements.txt` file listing the necessary Python libraries (`PyYAML` and `Pillow`).
-- A `README.md` file explaining the project's purpose, file structure, setup instructions, and a detailed step-by-step workflow for a user.
+- A `requirements.txt` file listing `PyYAML` and `Pillow`.
+- A `README.md` file explaining the project's purpose, setup, and a detailed workflow with examples for all command-line arguments.

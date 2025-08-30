@@ -8,6 +8,16 @@ paths:
   timers_subdir: 'timers'
   # font_file has been moved to the specific sections below.
 
+# -- NEW SECTION: Source Video Processing --
+# Defines filters to apply to the main source video (e.g., your GH6 footage)
+# This is where you convert V-Log to a standard viewable format.
+source_video_processing:
+  # Set to true to enable the LUT. Set to false to skip this step entirely.
+  apply_lut: true
+  
+  # The full path to your .cube, .3dl, or other LUT file.
+  # Use a LUT designed for your camera's log profile (e.g., V-Log to Rec.709)
+  lut_file: 'C:/Users/Preston Connors/Downloads/VLog_to_V709_forV35_EN/VLog_to_V709_forV35_ver100.cube'
 
 # -- Section 2: Progress Ring Style --
 progress_ring:
@@ -16,7 +26,10 @@ progress_ring:
   size: 400
   stroke_width: 30
   border_width: 3
-  no_text: false 
+  no_text: false
+  position:
+    x: 'W-w-250'
+    y: '250'
   text:
     # Font specifically for the countdown number
     font_file: 'C:/Users/Preston Connors/AppData/Local/Microsoft/Windows/Fonts/Inter-VariableFont_opsz,wght.ttf' # Example: A digital-style font
@@ -36,15 +49,13 @@ text_overlays:
     # Font specifically for the exercise title card
     font_file: 'C:/Users/Preston Connors/AppData/Local/Microsoft/Windows/Fonts/Roboto-VariableFont_wdth,wght.ttf'
     font_style: 'Bold' # Variable font style for the title
-    font_size: 80
+    font_size: 120
     font_color: 'white'
     box_color: 'black@0.7'
     box_border_width: 15
-    position_x: '(w-text_w)/2'
-    position_y: 'h*0.8'
-    wrap_at_char: 25
-    show_for_seconds: 5
-    show_from_second: 1
+    position_x: '250'
+    position_y: '250'
+    wrap_at_char: 20
     
     
 # -- Section 4: Final Video Output Settings --

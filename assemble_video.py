@@ -3,13 +3,13 @@ import sys
 import yaml
 import textwrap
 import subprocess
-from pathlib import Path  # Import the modern path handling library
+import argparse
+import time
+from pathlib import Path
+import shutil
 
+# --- Helper Functions ---
 def sanitize_text_for_ffmpeg(text: str) -> str:
-    """
-    Escapes characters that are special to FFmpeg's drawtext filter.
-    Most importantly, it handles single quotes and colons.
-    """
     text = text.replace('\\', '\\\\')
     text = text.replace("'", "'\\\\\\''")
     text = text.replace('"', '\\"')
@@ -18,175 +18,174 @@ def sanitize_text_for_ffmpeg(text: str) -> str:
     return text
 
 def prepare_text_for_ffmpeg(text: str, line_width: int = 25) -> str:
-    """
-    Wraps text to a given line width and sanitizes it to be safely 
-    injected into an FFmpeg drawtext filter string.
-    """
     wrapped_lines = textwrap.wrap(text, width=line_width, break_long_words=True, replace_whitespace=True)
     wrapped_text = "\n".join(wrapped_lines)
     return sanitize_text_for_ffmpeg(wrapped_text)
 
-def assemble_video(config_path: str, routine_path: str, source_video_path: str, output_path: str):
-    """
-    Assembles the final exercise video based on a routine and a config file.
-    """
-    # --- Load Configurations ---
+# --- Main Logic ---
+def assemble_video(
+    config_path: str, 
+    routine_path: str, 
+    source_video_path: str, 
+    output_path: str, 
+    segments_to_process: list[int] | None = None,
+    source_start_offset: float = 0.0,
+    source_end_limit: float | None = None
+):
+    total_start_time = time.monotonic()
+    
     try:
-        with open(config_path, 'r') as f:
-            cfg = yaml.safe_load(f)
+        with open(config_path, 'r') as f: cfg = yaml.safe_load(f)
     except FileNotFoundError:
-        print(f"FATAL: Main config file not found at '{config_path}'")
-        sys.exit(1)
-        
+        print(f"FATAL: Config file not found at '{config_path}'"); sys.exit(1)
     try:
-        with open(routine_path, 'r') as f:
-            routine = yaml.safe_load(f)
+        with open(routine_path, 'r') as f: routine = yaml.safe_load(f)
     except FileNotFoundError:
-        print(f"FATAL: Routine file not found at '{routine_path}'")
-        sys.exit(1)
-
+        print(f"FATAL: Routine file not found at '{routine_path}'"); sys.exit(1)
     if not os.path.exists(source_video_path):
-        print(f"FATAL: Source video not found at '{source_video_path}'")
-        sys.exit(1)
+        print(f"FATAL: Source video not found at '{source_video_path}'"); sys.exit(1)
 
-    # Store config sections in easy-to-use variables
-    paths_cfg = cfg['paths']
-    video_cfg = cfg['video_output']
-    title_cfg = cfg['text_overlays']['exercise_name']
-    ring_cfg = cfg['progress_ring']
+    paths_cfg, video_cfg, title_cfg, ring_cfg, source_cfg = (
+        cfg['paths'], cfg['video_output'], cfg['text_overlays']['exercise_name'], 
+        cfg['progress_ring'], cfg.get('source_video_processing', {})
+    )
 
-    current_timestamp = 0.0
-    segment_files = []
+    routine_elapsed_time, segment_files = 0.0, []
 
     print("--- 🏋️ Starting Video Assembly 🏋️ ---")
-
-    # --- Loop through each exercise in the routine ---
+    if source_start_offset > 0: print(f"  > Using source video starting from {source_start_offset:.2f}s.")
+    if source_end_limit is not None: print(f"  > Capping source video at {source_end_limit:.2f}s.")
+        
     for i, exercise in enumerate(routine):
+        segment_number = i + 1
         name = exercise.get('name', 'Unnamed Exercise')
         length = float(exercise.get('length', 0))
-
-        if length <= 0:
-            print(f"  > WARNING: Skipping segment '{name}' because its length is {length}.")
+        
+        start_time_in_source = source_start_offset + routine_elapsed_time
+        end_time_in_source = start_time_in_source + length
+        
+        if segments_to_process and segment_number not in segments_to_process:
+            print(f"\nSkipping Segment {segment_number}/{len(routine)}: '{name}'")
+            routine_elapsed_time += length
             continue
-        
-        start_time = current_timestamp
-        end_time = current_timestamp + length
-        
-        output_segment_file = f"temp_segment_{i}.mp4"
-        print(f"\nProcessing Segment {i+1}/{len(routine)}: '{name}' ({length}s)")
+        if length <= 0:
+            print(f"\nSkipping Segment {segment_number}/{len(routine)}: '{name}' (zero length).")
+            routine_elapsed_time += length
+            continue
+        if source_end_limit is not None and end_time_in_source > source_end_limit:
+            print(f"\n  > WARNING: Segment '{name}' would end past the specified end point. Stopping.")
+            break
 
-        # Check for Required Timer Asset
+        output_segment_file = f"temp_segment_{i}.mp4"
+        print(f"\nProcessing Segment {segment_number}/{len(routine)}: '{name}' ({length}s)")
+        print(f"  > Source time: {start_time_in_source:.2f}s -> {end_time_in_source:.2f}s")
+        
+        print(f"  > Step 1/3: Checking for timer asset...")
         timer_duration = int(length)
         timer_file = os.path.join(paths_cfg['asset_output_dir'], paths_cfg['timers_subdir'], f'timer_{timer_duration}s.mov')
-
         use_timer = os.path.exists(timer_file)
-        if not use_timer:
-            print(f"  > WARNING: Timer file not found: '{timer_file}'.")
-            print(f"  > Please generate it first by running: python create_progress_ring.py {timer_duration}")
+        if not use_timer: print("    - WARNING: Timer not found. Will skip timer overlay.")
 
-        # --- Build the -filter_complex FFmpeg String ---
+        print("  > Step 2/3: Building FFmpeg filter command...")
+        video_filter_chain = (f"[0:v]trim=start={start_time_in_source}:end={end_time_in_source},setpts=PTS-STARTPTS")
+        apply_lut, lut_file = source_cfg.get('apply_lut', False), source_cfg.get('lut_file')
+        if apply_lut and lut_file and os.path.exists(lut_file):
+            print("    - Applying V-Log to Rec.709 transform with provided LUT.")
+            lut_path = lut_file.replace('\\', '/').replace(':', '\\:')
+            video_filter_chain += (f",zscale=t=linear:npl=100,format=gbrp16le,lut3d=file='{lut_path}',zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p")
+        elif apply_lut: print(f"    - WARNING: LUT enabled, but file not found: '{lut_file}'.")
+        video_filter_chain += f",scale={video_cfg['resolution']},setsar=1[base];"
         
-        filter_complex = (
-            f"[0:v]trim=start={start_time}:end={end_time},setpts=PTS-STARTPTS,"
-            f"scale={video_cfg['resolution']},setsar=1[base];"
-        )
-        
+        filter_complex = video_filter_chain
         last_stream = "[base]"
-
         if use_timer:
+            pos = ring_cfg['position']
             filter_complex += f"[1:v]scale={ring_cfg['size']}:-1[timer];"
-            filter_complex += f"{last_stream}[timer]overlay=x=(W-w)/2:y=50[v_with_timer];"
+            filter_complex += f"{last_stream}[timer]overlay=x='{pos['x']}':y='{pos['y']}'[v_with_timer];"
             last_stream = "[v_with_timer]"
-
+        
         clean_text = prepare_text_for_ffmpeg(name, title_cfg['wrap_at_char'])
-        show_from = title_cfg['show_from_second']
-        show_to = show_from + title_cfg['show_for_seconds']
-        font_path_for_ffmpeg = title_cfg['font_file'].replace('\\', '/').replace(':', '\\:')
-
-        filter_complex += (
-            f"{last_stream}drawtext="
-            f"fontfile='{font_path_for_ffmpeg}':"
-            f"text='{clean_text}':"
-            f"fontsize={title_cfg['font_size']}:"
-            f"fontcolor={title_cfg['font_color']}:"
-            f"box=1:boxcolor={title_cfg['box_color']}:boxborderw={title_cfg['box_border_width']}:"
-            f"x={title_cfg['position_x']}:"
-            f"y={title_cfg['position_y']}:"
-            f"enable='between(t,{show_from},{show_to})'[final_v]"
-        )
-
-        # --- Build and Run the FFmpeg Command ---
+        font_path = title_cfg['font_file'].replace('\\', '/').replace(':', '\\:')
+        filter_complex += (f"{last_stream}drawtext=fontfile='{font_path}':text='{clean_text}':fontsize={title_cfg['font_size']}:fontcolor={title_cfg['font_color']}:box=1:boxcolor={title_cfg['box_color']}:boxborderw={title_cfg['box_border_width']}:x='{title_cfg['position_x']}':y='{title_cfg['position_y']}'[final_v]")
+        
         ffmpeg_cmd = ['ffmpeg', '-y', '-i', source_video_path]
-        if use_timer:
-            ffmpeg_cmd.extend(['-i', timer_file])
+        if use_timer: ffmpeg_cmd.extend(['-i', timer_file])
+        ffmpeg_cmd.extend(['-filter_complex', filter_complex, '-map', '[final_v]', '-map', '0:a?', '-c:v', video_cfg['codec'], '-preset', video_cfg['preset'], '-cq', str(video_cfg['quality']), '-c:a', video_cfg['audio_codec'], '-b:a', video_cfg['audio_bitrate'], output_segment_file])
         
-        ffmpeg_cmd.extend([
-            '-filter_complex', filter_complex,
-            '-map', '[final_v]',
-            '-map', '0:a?',
-            '-c:v', video_cfg['codec'], '-preset', video_cfg['preset'], '-cq', str(video_cfg['quality']),
-            '-c:a', video_cfg['audio_codec'], '-b:a', video_cfg['audio_bitrate'],
-            output_segment_file
-        ])
-        
+        print("  > Step 3/3: Encoding with FFmpeg...")
+        encoding_start_time = time.monotonic()
         try:
-            result = subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True, encoding='utf-8')
-            print(f"  > Successfully created segment: {output_segment_file}")
+            subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True, encoding='utf-8')
+            encoding_duration = time.monotonic() - encoding_start_time
+            print(f"    - Done. Segment encoded in {encoding_duration:.2f}s.")
             segment_files.append(output_segment_file)
         except subprocess.CalledProcessError as e:
-            print(f"\n--- FATAL: FFmpeg failed while creating segment for '{name}'. ---")
-            e.cmd[e.cmd.index('-filter_complex') + 1] = f'"{e.cmd[e.cmd.index("-filter_complex") + 1]}"'
-            print("  > Failing command (for copy/pasting into shell):\n", " ".join(e.cmd))
-            print("\n  > FFmpeg error output (stderr):\n", e.stderr)
-            sys.exit(1)
+            print(f"\n--- FATAL: FFmpeg failed on segment for '{name}'. ---")
+            print("\n  > FFmpeg stderr:\n", e.stderr); sys.exit(1)
 
-        current_timestamp = end_time
+        routine_elapsed_time += length
 
-    # --- Concatenate all segments ---
     if not segment_files:
-        print("\nNo segments were created. Aborting final assembly.")
-        sys.exit(1)
+        print("\nNo segments were created. Nothing to assemble."); sys.exit(0)
 
-    print("\n--- 🎞️ Concatenating Segments ---")
-    concat_file = "concat_list.txt"
-    with open(concat_file, 'w', encoding='utf-8') as f:
-        for file in segment_files:
-            # --- MODIFIED: Use pathlib to create a clean, forward-slash path ---
-            # This is robust and avoids the f-string backslash syntax error.
-            path_obj = Path(file).resolve()
-            clean_path = path_obj.as_posix()
-            f.write(f"file '{clean_path}'\n")
+    if len(segment_files) == 1:
+        print("\n--- 🎞️ Finalizing Single Segment ---")
+        single_file = segment_files[0]
+        try:
+            shutil.move(single_file, output_path)
+            print(f"  > Renamed '{single_file}' to '{output_path}'.")
+        except Exception as e:
+            print(f"  > FATAL: Could not move the single segment file: {e}"); sys.exit(1)
+    else:
+        print(f"\n--- 🎞️ Concatenating {len(segment_files)} Segments ---")
+        concat_file = "concat_list.txt"
+        with open(concat_file, 'w', encoding='utf-8') as f:
+            for file in segment_files:
+                f.write(f"file '{Path(file).resolve().as_posix()}'\n")
+                
+        concat_start_time = time.monotonic()
+        concat_cmd = ['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_file, '-c', 'copy', output_path]
+        try:
+            subprocess.run(concat_cmd, check=True, capture_output=True, text=True, encoding='utf-8')
+            print(f"  > Concatenation finished in {time.monotonic() - concat_start_time:.2f}s.")
+        except subprocess.CalledProcessError as e:
+            print(f"  > FATAL: FFmpeg failed during concatenation."); print(e.stderr); sys.exit(1)
+        try: os.remove(concat_file)
+        except OSError: pass
 
-    concat_cmd = ['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_file, '-c', 'copy', output_path]
-    try:
-        subprocess.run(concat_cmd, check=True, capture_output=True, text=True, encoding='utf-8')
-    except subprocess.CalledProcessError as e:
-        print(f"  > FATAL: FFmpeg failed while concatenating segments.")
-        print("  > Failing command:", " ".join(e.cmd))
-        print("  > FFmpeg error output (stderr):", e.stderr)
-        sys.exit(1)
-
-    # --- Clean up temporary files ---
     print("\n--- 🧹 Cleaning Up Temporary Files ---")
-    try:
-        os.remove(concat_file)
-        for file in segment_files:
-            os.remove(file)
-    except OSError as e:
-        print(f"  Warning: Could not delete all temporary files: {e}")
-        
+    for file in segment_files:
+        try: os.remove(file)
+        except OSError: pass
+    
     print(f"\n✅ Video assembly complete! Final video saved to: {output_path}")
+    print(f"   Total time taken: {time.monotonic() - total_start_time:.2f} seconds.")
+
 
 if __name__ == '__main__':
-    if len(sys.argv) < 4:
-        print("Creates a complete exercise video from a source file and a routine plan.")
-        print("\nUsage: python assemble_video.py <routine.yaml> <source_video.mov> <output_video.mp4>")
-        print("\nExample: python assemble_video.py my_workout.yaml D:/workouts/raw_footage.mov final_workout.mp4")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Creates a complete exercise video from a source file and a routine plan.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("routine_path", help="Path to the routine YAML file.")
+    parser.add_argument("source_video", help="Path to the source video file.")
+    parser.add_argument("output_video", help="Path for the final output video.")
+    parser.add_argument("--start", type=float, default=0.0, help="Start time in source video (seconds).")
+    parser.add_argument("--end", type=float, help="End time in source video (seconds).")
+    parser.add_argument("--segments", type=str, help="Comma-separated list of segments to process (e.g., '1,3,5').")
+    parser.add_argument("--config", type=str, default='config.yaml', help="Path to config file.")
+    args = parser.parse_args()
     
-    config_file_path = 'config.yaml'
-    routine_file_path = sys.argv[1]
-    source_video_file_path = sys.argv[2]
-    output_video_file_path = sys.argv[3]
+    segments_to_run = None
+    if args.segments:
+        try:
+            segments_to_run = [int(s.strip()) for s in args.segments.split(',')]
+        except ValueError:
+            print("FATAL: Invalid --segments format. Use comma-separated numbers."); sys.exit(1)
 
-    assemble_video(config_file_path, routine_file_path, source_video_file_path, output_video_file_path)
+    assemble_video(
+        config_path=args.config,
+        routine_path=args.routine_path,
+        source_video_path=args.source_video,
+        output_path=args.output_video,
+        segments_to_process=segments_to_run,
+        source_start_offset=args.start,
+        source_end_limit=args.end
+    )
