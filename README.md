@@ -9,9 +9,12 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
 - **Centralized Styling:** All visual elements (colors, fonts, sizes, positions) are controlled in a single `config.yaml` file for easy theme changes.
 - **Routine-Based Editing:** Video structure is defined in a simple `routine.yaml` file, listing exercises and their durations.
 - **Automated Asset Generation:** A script (`create_progress_ring.py`) automatically generates high-quality, reusable animated timer assets.
-- **V-Log / LUT Support:** Automatically applies a specified `.cube` LUT to the source video for professional color grading (e.g., V-Log to Rec.709 conversion).
-- **Configurable Overlay Positioning:** Place the timer and exercise titles anywhere on the screen using FFmpeg's powerful positioning expressions directly in the config file.
-- **Partial Rendering:** Re-render specific segments of your routine for testing, or extract a specific portion of a long source video using start/end time commands.
+- **V-Log / LUT Support:** Automatically applies a specified `.cube` LUT to the source video for professional color grading (e.g., V-Log to Rec.709 conversion), controlled via the config.
+- **Configurable Audio:** Automatically convert mono microphone tracks to stereo for better playback compatibility, controlled via the config.
+- **Flexible Overlay Positioning:** Place the timer and exercise titles anywhere on the screen using FFmpeg's positioning expressions directly in the config file.
+- **Powerful Rendering Options:**
+    - **Partial Rendering:** Re-render specific segments of your routine for quick tests.
+    - **Source Trimming:** Extract a specific routine from the middle of a long source video using `--start` and `--end` time commands.
 - **High Performance:** The timer generation script is highly optimized, and the assembly script uses GPU-accelerated FFmpeg commands where possible.
 - **Professional Formats:** Timer assets are created in ProRes 4444 with a transparent alpha channel for high-quality compositing.
 
@@ -51,7 +54,7 @@ pip install -r requirements.txt
 
 ### Step 1: Configure Your Style
 
-Open `config.yaml` and edit the settings. This is where you set everything: fonts, colors, sizes, video resolution, overlay positions, and the path to your color grading LUT. You generally only need to do this once per visual style.
+Open `config.yaml` and edit the settings. This is where you set everything: fonts, colors, sizes, video resolution, overlay positions, the path to your color grading LUT, and audio settings. You generally only need to do this once per visual style.
 
 ### Step 2: Define Your Routine
 
@@ -72,7 +75,7 @@ Open or create a `routine.yaml` file. List each exercise or rest period with its
 The assembly script needs a pre-made timer video for each unique duration in your routine.
 
 1.  Look at your `routine.yaml` and find all unique `length` values (e.g., 45, 53, 60).
-2.  For each unique duration, run the `create_progress_ring.py` script. The script automatically reads your `config.yaml`, generates the animation, creates a `.mov` file, and cleans up after itself.
+2.  For each unique duration, run the `create_progress_ring.py` script. It will automatically read your `config.yaml`, generate the animation, create a `.mov` file, and clean up after itself.
 
 **Example Commands:**
 ```bash
@@ -80,7 +83,6 @@ python create_progress_ring.py 45
 python create_progress_ring.py 53
 python create_progress_ring.py 60
 ```
-After running these, your `assets/timers/` folder will be populated with the necessary `.mov` files.
 
 ### Step 4: Assemble the Final Video
 
@@ -96,22 +98,20 @@ python assemble_video.py <routine_file> <source_video> <output_video> [options]
 - `--start 300`: Start using the source video from the 5-minute mark (300 seconds).
 - `--end 1800`: Do not use any footage past the 30-minute mark (1800 seconds).
 
-**Example 1: Process the entire routine**```bash
+**Example 1: Process the entire routine**
+```bash
 python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "final_video.mp4"
 ```
 
 **Example 2: Extract a specific routine from the middle of a long recording**
-
 Let's say your actual routine starts 10 minutes into your recording and lasts for 25 minutes.
 ```bash
 python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "final_cut.mp4" --start 600 --end 2100
 ```
-This command will:
-- Start reading from the `600` second mark of `raw_workout.MOV`.
-- Stop processing any segments that would end after the `2100` second mark.
 
 **Example 3: Test a single segment from the middle of the recording**
+This is great for quickly checking your overlay positions and styles.
 ```bash
-python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "test_segment_4.mp4" --start 600 --segments 4
+python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "test.mp4" --start 600 --segments 4
 ```
 This will process only the 4th exercise in the routine, but it will correctly calculate its start time as `600 + <duration of segments 1, 2, and 3>`.

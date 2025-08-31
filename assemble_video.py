@@ -8,7 +8,6 @@ import time
 from pathlib import Path
 import shutil
 
-# --- Helper Functions ---
 def sanitize_text_for_ffmpeg(text: str) -> str:
     text = text.replace('\\', '\\\\')
     text = text.replace("'", "'\\\\\\''")
@@ -22,7 +21,6 @@ def prepare_text_for_ffmpeg(text: str, line_width: int = 25) -> str:
     wrapped_text = "\n".join(wrapped_lines)
     return sanitize_text_for_ffmpeg(wrapped_text)
 
-# --- Main Logic ---
 def assemble_video(
     config_path: str, 
     routine_path: str, 
@@ -86,21 +84,33 @@ def assemble_video(
         use_timer = os.path.exists(timer_file)
         if not use_timer: print("    - WARNING: Timer not found. Will skip timer overlay.")
 
-        print("  > Step 2/3: Building FFmpeg filter command...")
-        video_filter_chain = (f"[0:v]trim=start={start_time_in_source}:end={end_time_in_source},setpts=PTS-STARTPTS")
+        print("  > Step 2/3: Building FFmpeg command...")
+        
+        ffmpeg_cmd = [
+            'ffmpeg', '-y',
+            '-ss', str(start_time_in_source),
+            '-to', str(end_time_in_source),
+            '-i', source_video_path
+        ]
+        
+        if use_timer:
+            ffmpeg_cmd.extend(['-i', timer_file])
+            timer_input_index = 1
+        
+        video_filter_chain = "[0:v]" 
         apply_lut, lut_file = source_cfg.get('apply_lut', False), source_cfg.get('lut_file')
         if apply_lut and lut_file and os.path.exists(lut_file):
             print("    - Applying V-Log to Rec.709 transform with provided LUT.")
             lut_path = lut_file.replace('\\', '/').replace(':', '\\:')
-            video_filter_chain += (f",zscale=t=linear:npl=100,format=gbrp16le,lut3d=file='{lut_path}',zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p")
-        elif apply_lut: print(f"    - WARNING: LUT enabled, but file not found: '{lut_file}'.")
-        video_filter_chain += f",scale={video_cfg['resolution']},setsar=1[base];"
+            video_filter_chain += (f"zscale=t=linear:npl=100,format=gbrp16le,lut3d=file='{lut_path}',zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p,")
+        
+        video_filter_chain += f"scale={video_cfg['resolution']},setsar=1[base];"
         
         filter_complex = video_filter_chain
         last_stream = "[base]"
         if use_timer:
             pos = ring_cfg['position']
-            filter_complex += f"[1:v]scale={ring_cfg['size']}:-1[timer];"
+            filter_complex += f"[{timer_input_index}:v]scale={ring_cfg['size']}:-1[timer];"
             filter_complex += f"{last_stream}[timer]overlay=x='{pos['x']}':y='{pos['y']}'[v_with_timer];"
             last_stream = "[v_with_timer]"
         
@@ -108,16 +118,29 @@ def assemble_video(
         font_path = title_cfg['font_file'].replace('\\', '/').replace(':', '\\:')
         filter_complex += (f"{last_stream}drawtext=fontfile='{font_path}':text='{clean_text}':fontsize={title_cfg['font_size']}:fontcolor={title_cfg['font_color']}:box=1:boxcolor={title_cfg['box_color']}:boxborderw={title_cfg['box_border_width']}:x='{title_cfg['position_x']}':y='{title_cfg['position_y']}'[final_v]")
         
-        ffmpeg_cmd = ['ffmpeg', '-y', '-i', source_video_path]
-        if use_timer: ffmpeg_cmd.extend(['-i', timer_file])
-        ffmpeg_cmd.extend(['-filter_complex', filter_complex, '-map', '[final_v]', '-map', '0:a?', '-c:v', video_cfg['codec'], '-preset', video_cfg['preset'], '-cq', str(video_cfg['quality']), '-c:a', video_cfg['audio_codec'], '-b:a', video_cfg['audio_bitrate'], output_segment_file])
+        final_cmd_args = [
+            '-filter_complex', filter_complex,
+            '-map', '[final_v]',
+            '-map', '0:a:0?', 
+            '-c:v', video_cfg['codec'], '-preset', video_cfg['preset'], '-cq', str(video_cfg['quality']),
+            '-c:a', video_cfg['audio_codec'], '-b:a', video_cfg['audio_bitrate']
+        ]
+        
+        audio_channels = video_cfg.get('audio_channels', 1)
+        if audio_channels == 2:
+            print("    - Converting audio to stereo.")
+            final_cmd_args.extend(['-filter:a', 'pan=stereo|c0=c0|c1=c0'])
+        else:
+            print("    - Keeping audio mono.")
+        
+        ffmpeg_cmd.extend(final_cmd_args)
+        ffmpeg_cmd.extend(['-shortest', output_segment_file])
         
         print("  > Step 3/3: Encoding with FFmpeg...")
         encoding_start_time = time.monotonic()
         try:
             subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True, encoding='utf-8')
-            encoding_duration = time.monotonic() - encoding_start_time
-            print(f"    - Done. Segment encoded in {encoding_duration:.2f}s.")
+            print(f"    - Done. Segment encoded in {time.monotonic() - encoding_start_time:.2f}s.")
             segment_files.append(output_segment_file)
         except subprocess.CalledProcessError as e:
             print(f"\n--- FATAL: FFmpeg failed on segment for '{name}'. ---")
@@ -126,23 +149,20 @@ def assemble_video(
         routine_elapsed_time += length
 
     if not segment_files:
-        print("\nNo segments were created. Nothing to assemble."); sys.exit(0)
+        print("\nNo segments were created."); sys.exit(0)
 
     if len(segment_files) == 1:
         print("\n--- 🎞️ Finalizing Single Segment ---")
-        single_file = segment_files[0]
         try:
-            shutil.move(single_file, output_path)
-            print(f"  > Renamed '{single_file}' to '{output_path}'.")
+            shutil.move(segment_files[0], output_path)
+            print(f"  > Renamed '{segment_files[0]}' to '{output_path}'.")
         except Exception as e:
-            print(f"  > FATAL: Could not move the single segment file: {e}"); sys.exit(1)
+            print(f"  > FATAL: Could not move segment file: {e}"); sys.exit(1)
     else:
         print(f"\n--- 🎞️ Concatenating {len(segment_files)} Segments ---")
         concat_file = "concat_list.txt"
         with open(concat_file, 'w', encoding='utf-8') as f:
-            for file in segment_files:
-                f.write(f"file '{Path(file).resolve().as_posix()}'\n")
-                
+            for file in segment_files: f.write(f"file '{Path(file).resolve().as_posix()}'\n")
         concat_start_time = time.monotonic()
         concat_cmd = ['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_file, '-c', 'copy', output_path]
         try:
@@ -175,10 +195,9 @@ if __name__ == '__main__':
     
     segments_to_run = None
     if args.segments:
-        try:
-            segments_to_run = [int(s.strip()) for s in args.segments.split(',')]
+        try: segments_to_run = [int(s.strip()) for s in args.segments.split(',')]
         except ValueError:
-            print("FATAL: Invalid --segments format. Use comma-separated numbers."); sys.exit(1)
+            print("FATAL: Invalid --segments format."); sys.exit(1)
 
     assemble_video(
         config_path=args.config,
