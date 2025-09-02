@@ -58,8 +58,12 @@ text_overlays:
     wrap_at_char: 20
     
     
-# -- Section 4: Final Video Output Settings --
 video_output:
+  # --- MODIFIED: Added a new, better option ---
+  # 'scale': (Fastest) Resizes the entire source frame, may distort aspect ratio.
+  # 'crop':  (Simple) Crops from the center of the source. Only works well if aspect ratios match.
+  # 'scale_and_crop': (Best Quality) Scales to fill the height, then crops the width. Perfect for non-16:9 sources.
+  framing_method: 'scale_and_crop'
   resolution: '3840x2160'
   codec: 'h264_nvenc'
   preset: 'p6'
@@ -67,3 +71,15 @@ video_output:
   audio_codec: 'aac'
   audio_bitrate: '192k'
   audio_channels: 2
+
+  # -- NEW SECTION: Test Mode Overrides --
+# These settings will be used INSTEAD of the ones in video_output when
+# the --test flag is used with assemble_video.py.
+test_mode_settings:
+  resolution: '854x480'  # 480p SD
+  framerate: 15          # Low frame rate for speed
+  codec: 'h264_nvenc'
+  preset: 'p1'           # Fastest possible preset
+  quality: 28            # Lower quality, much faster encode
+  audio_bitrate: '96k'   # Lower audio quality for test
+  # audio_channels is inherited from video_output if not specified here
