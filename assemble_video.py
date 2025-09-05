@@ -8,7 +8,9 @@ import time
 from pathlib import Path
 import shutil
 
+# --- Helper Functions ---
 def sanitize_text_for_ffmpeg(text: str) -> str:
+    """Escapes characters that are special to FFmpeg's drawtext filter."""
     text = text.replace('\\', '\\\\')
     text = text.replace("'", "'\\\\\\''")
     text = text.replace('"', '\\"')
@@ -17,10 +19,12 @@ def sanitize_text_for_ffmpeg(text: str) -> str:
     return text
 
 def prepare_text_for_ffmpeg(text: str, line_width: int = 25) -> str:
+    """Wraps text and sanitizes it for the drawtext filter."""
     wrapped_lines = textwrap.wrap(text, width=line_width, break_long_words=True, replace_whitespace=True)
     wrapped_text = "\n".join(wrapped_lines)
     return sanitize_text_for_ffmpeg(wrapped_text)
 
+# --- Main Logic ---
 def assemble_video(
     config_path: str, 
     routine_path: str, 
@@ -29,7 +33,8 @@ def assemble_video(
     segments_to_process: list[int] | None = None,
     source_start_offset: float = 0.0,
     source_end_limit: float | None = None,
-    test_mode: bool = False
+    test_mode: bool = False,
+    verbose_mode: bool = False
 ):
     total_start_time = time.monotonic()
     
@@ -44,15 +49,15 @@ def assemble_video(
     if not os.path.exists(source_video_path):
         print(f"FATAL: Source video not found at '{source_video_path}'"); sys.exit(1)
 
-    paths_cfg, video_cfg, title_cfg, ring_cfg, source_cfg = (
+    paths_cfg, video_cfg, title_cfg, ring_cfg, source_cfg, finish_cfg = (
         cfg['paths'], cfg['video_output'].copy(), cfg['text_overlays']['exercise_name'], 
-        cfg['progress_ring'], cfg.get('source_video_processing', {})
+        cfg['progress_ring'], cfg.get('source_video_processing', {}), cfg.get('finishing_filters', {})
     )
     
     if test_mode:
         print("\n--- 🧪 TEST MODE ENABLED 🧪 ---")
         if cfg.get('test_mode_settings'):
-            video_cfg.update(cfg['test_mode_settings'])
+            video_cfg.update(cfg.get('test_mode_settings'))
 
     routine_elapsed_time, segment_files = 0.0, []
 
@@ -65,10 +70,10 @@ def assemble_video(
         start_time_in_source, end_time_in_source = source_start_offset + routine_elapsed_time, source_start_offset + routine_elapsed_time + length
         
         if segments_to_process and segment_number not in segments_to_process:
-            print(f"\nSkipping Segment {segment_number}/{len(routine)}: '{name}'")
+            if verbose_mode: print(f"\nSkipping Segment {segment_number}/{len(routine)}: '{name}'")
             routine_elapsed_time += length; continue
         if length <= 0:
-            print(f"\nSkipping Segment {segment_number}/{len(routine)}: '{name}' (zero length).")
+            if verbose_mode: print(f"\nSkipping Segment {segment_number}/{len(routine)}: '{name}' (zero length).")
             routine_elapsed_time += length; continue
         if source_end_limit is not None and end_time_in_source > source_end_limit:
             print(f"\n  > WARNING: Segment '{name}' would end past specified end point. Stopping."); break
@@ -85,8 +90,7 @@ def assemble_video(
         ffmpeg_cmd = ['ffmpeg', '-y', '-ss', str(start_time_in_source), '-to', str(end_time_in_source), '-i', source_video_path]
         if use_timer:
             print("    - Found timer asset.")
-            ffmpeg_cmd.extend(['-i', timer_file])
-            timer_input_index = 1
+            ffmpeg_cmd.extend(['-i', timer_file]); timer_input_index = 1
         else:
             print("    - WARNING: Timer not found. Skipping overlay.")
 
@@ -99,27 +103,44 @@ def assemble_video(
             print("    - Applying V-Log to Rec.709 transform with provided LUT.")
             lut_path = lut_file.replace('\\', '/').replace(':', '\\:')
             video_filter_chain += (
-                f",zscale=rin=full:r=full:matrix=709:p=2020:t=arib-std-b67, "
-                f"lut3d=file='{lut_path}', "
-                f"zscale=p=709:t=709:m=709:r=limited, "
+                f",zscale=rin=full:r=full:matrix=709:p=2020:t=arib-std-b67,"
+                f"lut3d=file='{lut_path}',"
+                f"zscale=p=709:t=709:m=709:r=limited,"
                 f"format=yuv420p"
             )
         
+        denoise_cfg = finish_cfg.get('denoise', {})
+        if denoise_cfg.get('enabled', False):
+            strength, backend = denoise_cfg.get('strength', 1.0), denoise_cfg.get('backend', 'cpu').lower()
+            print(f"    - Applying Denoise (Backend: {backend}, Strength: {strength})")
+            if backend == 'cuda': video_filter_chain += f",nlmeans_cuda=strength={strength}"
+            # --- NEW LOGIC ---
+            elif backend == 'opencl':
+                # The OpenCL version also uses the 'strength' parameter, which is convenient.
+                video_filter_chain += f",nlmeans_opencl=strength={strength}"
+            else: video_filter_chain += f",nlmeans=s={strength}"
+        
         framing_method = video_cfg.get('framing_method', 'scale').lower()
-        target_resolution = video_cfg['resolution']
+        framing_backend = video_cfg.get('framing_backend', 'cpu').lower()
+        if framing_method == 'crop':
+            print("    - Framing method: Cropping to center (CPU).")
+            video_filter_chain += f",crop={video_cfg['resolution'].replace('x', ':')}"
+        else:
+            if framing_backend == 'cuda':
+                print(f"    - Framing method: Scaling to fit (GPU: scale_cuda).")
+                video_filter_chain += f",scale_cuda={video_cfg['resolution']}"
+            else:
+                print(f"    - Framing method: Scaling to fit (CPU: scale).")
+                video_filter_chain += f",scale={video_cfg['resolution']}"
         
-        if framing_method == 'scale_and_crop':
-            print("    - Framing method: Scaling to fill height, then cropping width (Best Quality).")
-            width, height = target_resolution.split('x')
-            video_filter_chain += f",scale=-1:{height},crop={width}:{height},setsar=1"
-        elif framing_method == 'crop':
-            print("    - Framing method: Cropping to center.")
-            video_filter_chain += f",crop={target_resolution.replace('x', ':')},setsar=1"
-        else: # 'scale' is the default
-            print("    - Framing method: Scaling to fit.")
-            video_filter_chain += f",scale={target_resolution},setsar=1"
-        
-        video_filter_chain += "[base];"
+        sharpen_cfg = finish_cfg.get('sharpen', {})
+        if sharpen_cfg.get('enabled', False):
+            amount, backend = sharpen_cfg.get('luma_amount', 0.5), sharpen_cfg.get('backend', 'cpu').lower()
+            print(f"    - Applying Sharpen (Backend: {backend}, Amount: {amount})")
+            if backend == 'cuda': video_filter_chain += f",unsharp_cuda=la={amount}"
+            else: video_filter_chain += f",unsharp=lx=3:ly=3:la={amount}"
+            
+        video_filter_chain += ",setsar=1[base];"
         
         filter_complex = video_filter_chain
         last_stream = "[base]"
@@ -139,14 +160,25 @@ def assemble_video(
         ffmpeg_cmd.extend(final_cmd_args)
         ffmpeg_cmd.extend(['-t', str(length), output_segment_file])
         
+        if verbose_mode:
+            print("    - Assembled FFmpeg command:")
+            temp_cmd = ffmpeg_cmd.copy()
+            temp_cmd[temp_cmd.index('-filter_complex') + 1] = f'"{temp_cmd[temp_cmd.index("-filter_complex") + 1]}"'
+            print("      " + " ".join(temp_cmd))
+        
         print("  > Step 3/3: Encoding with FFmpeg...")
         encoding_start_time = time.monotonic()
         try:
-            subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True, encoding='utf-8')
+            if verbose_mode:
+                subprocess.run(ffmpeg_cmd, check=True)
+            else:
+                subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True, encoding='utf-8')
             print(f"    - Done. Segment encoded in {time.monotonic() - encoding_start_time:.2f}s.")
             segment_files.append(output_segment_file)
         except subprocess.CalledProcessError as e:
-            print(f"\n--- FATAL: FFmpeg failed on segment for '{name}'. ---\n", e.stderr); sys.exit(1)
+            print(f"\n--- FATAL: FFmpeg failed on segment for '{name}'. ---")
+            if not verbose_mode: print("  > FFmpeg error output (stderr):\n", e.stderr)
+            sys.exit(1)
 
         routine_elapsed_time += length
 
@@ -163,13 +195,19 @@ def assemble_video(
         concat_file = "concat_list.txt"
         with open(concat_file, 'w', encoding='utf-8') as f:
             for file in segment_files: f.write(f"file '{Path(file).resolve().as_posix()}'\n")
-        concat_start_time = time.monotonic()
+        
         concat_cmd = ['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_file, '-c', 'copy', output_path]
+        if verbose_mode: print("    - Running concat command:", " ".join(concat_cmd))
+            
+        concat_start_time = time.monotonic()
         try:
-            subprocess.run(concat_cmd, check=True, capture_output=True, text=True, encoding='utf-8')
+            if verbose_mode: subprocess.run(concat_cmd, check=True)
+            else: subprocess.run(concat_cmd, check=True, capture_output=True, text=True, encoding='utf-8')
             print(f"  > Concatenation finished in {time.monotonic() - concat_start_time:.2f}s.")
         except subprocess.CalledProcessError as e:
-            print(f"  > FATAL: FFmpeg failed during concatenation."); print(e.stderr); sys.exit(1)
+            print(f"  > FATAL: FFmpeg failed during concatenation.")
+            if not verbose_mode: print("  > FFmpeg error output (stderr):", e.stderr)
+            sys.exit(1)
         try: os.remove(concat_file)
         except OSError: pass
 
@@ -181,7 +219,6 @@ def assemble_video(
     print(f"\n✅ Video assembly complete! Final video saved to: {output_path}")
     print(f"   Total time taken: {time.monotonic() - total_start_time:.2f} seconds.")
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Creates a complete exercise video from a source file and a routine plan.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("routine_path", help="Path to routine YAML file.")
@@ -191,7 +228,9 @@ if __name__ == '__main__':
     parser.add_argument("--end", type=float, help="End time in source video (seconds).")
     parser.add_argument("--segments", type=str, help="Comma-separated list of segments to process (e.g., '1,3,5').")
     parser.add_argument("--test", action="store_true", help="Enable test mode for a fast, low-quality preview render.")
+    parser.add_argument("--verbose", action="store_true", help="Show the full FFmpeg command and its real-time output.")
     parser.add_argument("--config", type=str, default='config.yaml', help="Path to config file.")
+    
     args = parser.parse_args()
     
     segments_to_run = None
@@ -208,5 +247,6 @@ if __name__ == '__main__':
         segments_to_process=segments_to_run,
         source_start_offset=args.start,
         source_end_limit=args.end,
-        test_mode=args.test
+        test_mode=args.test,
+        verbose_mode=args.verbose
     )

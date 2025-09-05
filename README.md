@@ -6,19 +6,20 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
 
 ## Features
 
-- **Centralized Styling:** All visual elements (colors, fonts, sizes, positions) are controlled in a single `config.yaml` file for easy theme changes.
+- **Centralized Styling:** All visual elements (colors, fonts, sizes, positions) are controlled in a single `config.yaml` file.
 - **Routine-Based Editing:** Video structure is defined in a simple `routine.yaml` file, listing exercises and their durations.
 - **Automated Asset Generation:** A script (`create_progress_ring.py`) automatically generates high-quality, reusable animated timer assets.
-- **Professional Color Grading:** Automatically applies a specified `.cube` LUT to the source video with a color-accurate filter chain for V-Log to Rec.709 conversion.
-- **Configurable Audio Processing:** Automatically convert mono microphone tracks to stereo for better playback compatibility.
-- **Flexible Overlay Positioning:** Place the timer and exercise titles anywhere on the screen using FFmpeg's positioning expressions in the config file.
-- **Configurable Framing:** Choose to either `crop` a center-cut from your source video (preserving aspect ratio) or `scale` it to fit.
-- **Automatic Title Casing:** Exercise names are automatically converted to Title Case for a clean, consistent look.
+- **Professional Color & Finishing Pipeline:**
+  - **Color Grading:** Automatically applies a specified `.cube` LUT with a color-accurate filter chain for V-Log to Rec.709 conversion.
+  - **Finishing Filters:** Apply optional, configurable denoising and sharpening for a final professional polish.
+- **Configurable Audio Processing:** Automatically convert mono microphone tracks to stereo.
+- **Flexible Overlay Positioning:** Place overlays anywhere using FFmpeg's positioning expressions in the config file.
+- **Configurable Framing:** Choose to either `crop` a center-cut from your source video (preserving aspect ratio) or `scale` it to fit, with an option for GPU-accelerated scaling.
 - **Powerful Rendering Options:**
-    - **Test Mode:** Generate a fast, low-quality preview to check timings and placement without a full render.
-    - **Partial Rendering:** Re-render specific segments of your routine.
-    - **Source Trimming:** Extract a specific routine from the middle of a long source video using `--start` and `--end` time commands.
-- **High Performance:** The timer generation script is highly optimized, and the assembly script uses GPU-accelerated FFmpeg commands where possible.
+  - **Test Mode:** Generate a fast, low-quality preview with the `--test` flag to check timings and placement.
+  - **Verbose Mode:** See the full FFmpeg command and its live output for deep debugging with the `--verbose` flag.
+  - **Partial Rendering:** Re-render specific segments of your routine with the `--segments` flag.
+  - **Source Trimming:** Extract a routine from a long source video using `--start` and `--end` time commands.
 
 ## Project Structure
 
@@ -40,8 +41,8 @@ Your project folder should be set up like this:
 ### 1. Prerequisites
 
 - **Python 3.8+**
-- **FFmpeg:** Must be installed and accessible in your system's PATH. (The full build from [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) is recommended for Windows).
-- An NVIDIA GPU is recommended for speed. If you don't have one, change the `codec` in `config.yaml` to `libx264`.
+- **FFmpeg:** Must be installed and accessible in your system's PATH. (A custom build via [Media-Autobuild Suite](https://github.com/m-ab-s/media-autobuild_suite) is recommended for enabling optional CUDA filters like `nlmeans_cuda`).
+- An NVIDIA GPU is recommended for speed. If you don't have one, change relevant `backend` and `codec` settings in `config.yaml` to `cpu` and `libx264`.
 
 ### 2. Install Python Dependencies
 
@@ -66,11 +67,7 @@ The assembly script needs a pre-made timer video for each unique duration in you
 ```bash
 python create_progress_ring.py <duration_in_seconds>
 ```
-**Example Commands:**
-```bash
-python create_progress_ring.py 45
-python create_progress_ring.py 53
-```
+**Example:** `python create_progress_ring.py 45`
 
 ### Step 4: Assemble the Final Video
 
@@ -82,16 +79,18 @@ python assemble_video.py <routine_file> <source_video> <output_video> [options]
 ```
 
 **Options:**
-- `--test`: Generate a fast, low-resolution preview.
+- `--test`: Generate a fast, low-quality preview.
+- `--verbose`: Show the full FFmpeg command and its live output.
 - `--segments "1,3,5"`: Process only specific segments (1-based index).
 - `--start 300`: Start using the source video from the 5-minute mark (300 seconds).
-- `--end 1800`: Do not use any footage past the 30-minute mark (1800 seconds).
+- `--end 1800`: Do not use any footage past the 30-minute mark.
 
-**Example 1: Full Quality Render**```bash
-python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "final_video.mp4"
+**Example 1: Full Quality Render**
+```bash
+python assemble_video.py routine.yaml "D:/Video/raw.MOV" "final_video.mp4"
 ```
 
-**Example 2: Fast Test Render of a Single Segment**
+**Example 2: Fast Test Render of a Single Segment for Debugging**
 ```bash
-python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "test_preview.mp4" --segments 5 --test
+python assemble_video.py routine.yaml "D:/Video/raw.MOV" "test.mp4" --segments 5 --test --verbose
 ```

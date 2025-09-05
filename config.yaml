@@ -6,80 +6,84 @@
 paths:
   asset_output_dir: 'assets'
   timers_subdir: 'timers'
-  # font_file has been moved to the specific sections below.
 
-# -- NEW SECTION: Source Video Processing --
+# -- Section 2: Source Video Processing --
 # Defines filters to apply to the main source video (e.g., your GH6 footage)
-# This is where you convert V-Log to a standard viewable format.
 source_video_processing:
-  # Set to true to enable the LUT. Set to false to skip this step entirely.
+  # Set to true to enable the LUT. This is essential for V-Log footage.
   apply_lut: true
   
   # The full path to your .cube, .3dl, or other LUT file.
-  # Use a LUT designed for your camera's log profile (e.g., V-Log to Rec.709)
   lut_file: 'C:/Users/Preston Connors/Downloads/VLog_to_V709_forV35_EN/VLog_to_V709_forV35_ver100.cube'
 
-# -- Section 2: Progress Ring Style --
+# -- Section 3: Finishing Filters --
+# Optional, high-quality filters applied after color grading for a final professional polish.
+finishing_filters:
+  denoise:
+    enabled: true
+    # Choose the filter backend: 'cpu' (universal), 'cuda', or 'opencl'.
+    backend: 'cpu' 
+    strength: 1.0 # For 'cpu': 1.0 is gentle. For 'cuda'/'opencl': 1.0 is also gentle.
+    
+  sharpen:
+    enabled: true
+    # Choose the filter backend: 'cpu' or 'cuda'.
+    backend: 'cpu'
+    luma_amount: 0.5 # For both backends, 0.5 is a nice, subtle sharpness.
+
+# -- Section 4: Progress Ring Style --
 progress_ring:
   fps: 60
   direction: 'clockwise'
   size: 400
   stroke_width: 30
   border_width: 3
-  no_text: false
+  no_text: false 
   position:
-    x: 'W-w-250'
-    y: '250'
+    x: 'W-w-250'  # Top-Right Safe Zone
+    y: '250'        # Top-Right Safe Zone
   text:
-    # Font specifically for the countdown number
-    font_file: 'C:/Users/Preston Connors/AppData/Local/Microsoft/Windows/Fonts/Inter-VariableFont_opsz,wght.ttf' # Example: A digital-style font
-    font_style: 'ExtraBold' # Variable font style for the countdown
+    font_file: 'C:/Users/Preston Connors/AppData/Local/Microsoft/Windows/Fonts/Inter-VariableFont_opsz,wght.ttf'
+    font_style: 'Bold'
     font_size_ratio: 0.4
     stroke_width: 4
     hide_on_zero: true
     background_circle:
       enabled: true
-    color: 'black@0.7'  # Same format as the exercise name box
-    padding: 0          # Extra radius (in pixels) around the text area
+      color: 'black@0.7'
+      padding: 0 # 0 padding makes it flush with the ring
 
-
-# -- Section 3: Text Overlay Styles --
+# -- Section 5: Text Overlay Styles --
 text_overlays:
   exercise_name:
-    # Font specifically for the exercise title card
     font_file: 'C:/Users/Preston Connors/AppData/Local/Microsoft/Windows/Fonts/Roboto-VariableFont_wdth,wght.ttf'
-    font_style: 'ExtraBold' # Variable font style for the title
+    font_style: 'ExtraBold' # Bolder for titles
     font_size: 120
     font_color: 'white'
     box_color: 'black@0.7'
     box_border_width: 15
-    position_x: '250'
+    position_x: '250'       # Top-Left Safe Zone
     position_y: '250'
     wrap_at_char: 20
-    
-    
+
+# -- Section 6: Final Video Output Settings --
 video_output:
-  # --- MODIFIED: Added a new, better option ---
-  # 'scale': (Fastest) Resizes the entire source frame, may distort aspect ratio.
-  # 'crop':  (Simple) Crops from the center of the source. Only works well if aspect ratios match.
-  # 'scale_and_crop': (Best Quality) Scales to fill the height, then crops the width. Perfect for non-16:9 sources.
-  framing_method: 'scale_and_crop'
+  framing_method: 'crop'     # 'crop' or 'scale'
+  framing_backend: 'cuda'    # 'cuda' or 'cpu' (only for scaling)
   resolution: '3840x2160'
   codec: 'h264_nvenc'
   preset: 'p6'
   quality: 19
   audio_codec: 'aac'
   audio_bitrate: '192k'
-  audio_channels: 2
+  audio_channels: 2          # 1 = Mono, 2 = Stereo
 
-  # -- NEW SECTION: Test Mode Overrides --
-# These settings will be used INSTEAD of the ones in video_output when
-# the --test flag is used with assemble_video.py.
+# -- Section 7: Test Mode Overrides --
+# These settings are used INSTEAD of the ones in video_output when --test is used.
 test_mode_settings:
-  resolution: '854x480'  # 480p SD
-  framerate: 15          # Low frame rate for speed
+  resolution: '854x480'  # 480p
+  framerate: 15
   codec: 'h264_nvenc'
-  preset: 'p1'           # Fastest possible preset
-  quality: 28            # Lower quality, much faster encode
-  audio_bitrate: '96k'   # Lower audio quality for test
-  # audio_channels is inherited from video_output if not specified here
+  preset: 'p1'           # Fastest
+  quality: 28            # Lower quality
+  audio_bitrate: '96k'
