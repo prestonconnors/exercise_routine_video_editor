@@ -12,10 +12,12 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
 - **Professional Color & Finishing Pipeline:**
   - **Color Grading:** Automatically applies a specified `.cube` LUT with a color-accurate filter chain for V-Log to Rec.709 conversion.
   - **Finishing Filters:** Apply optional, configurable denoising (with CPU or OpenCL GPU backends) and sharpening for a final professional polish.
+  - **Advanced Encoder Tuning:** Fine-tune NVENC settings like lookahead, AQ, and multipass directly from the config for maximum output quality.
+- **GPU-First Architecture:** The pipeline is optimized to perform as much work as possible on the GPU (decoding, scaling, denoising, encoding) for maximum performance.
 - **Configurable Audio Processing:** Automatically convert mono microphone tracks to stereo.
 - **Flexible Overlay Positioning:** Place overlays anywhere using FFmpeg's positioning expressions in the config file.
 - **Configurable Framing:** Choose to either `crop` a center-cut from your source video (preserving aspect ratio) or `scale` it to fit.
-- **Automatic Title Casing:** Exercise names are automatically converted to Title Case for a clean, consistent look.
+- **Automatic Title Casing:** Exercise names are automatically converted to Title Case.
 - **Powerful Rendering Options:**
   - **Test Mode:** Generate a fast, low-quality preview with the `--test` flag.
   - **Verbose Mode:** See the full FFmpeg command and its live output with the `--verbose` flag.
@@ -24,7 +26,6 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
 
 ## Project Structure
 
-Your project folder should be set up like this:
 ```
 .
 ├── assets/
@@ -42,12 +43,13 @@ Your project folder should be set up like this:
 ### 1. Prerequisites
 
 - **Python 3.8+**
-- **FFmpeg:** Must be installed and accessible in your system's PATH. (A custom build via [Media-Autobuild Suite](https://github.com/m-ab-s/media-autobuild_suite) is recommended for enabling optional GPU filters like `nlmeans_opencl`).
-- An NVIDIA GPU is recommended for speed. If you don't have one, change relevant `backend` and `codec` settings in `config.yaml` to `cpu` and `libx264`.
+- **FFmpeg:** Must be installed and accessible in your system's PATH. (A custom build via [Media-Autobuild Suite](https://github.com/m-ab-s/media-autobuild_suite) is highly recommended for enabling optional GPU filters like `nlmeans_opencl`).
+- **NVIDIA GPU with CUDA Toolkit installed.**
 
 ### 2. Install Python Dependencies
 
-In your terminal, navigate to the project folder and run:```bash
+In your terminal, navigate to the project folder and run:
+```bash
 pip install -r requirements.txt
 ```
 
@@ -67,7 +69,6 @@ The assembly script needs a pre-made timer video for each unique duration in you
 ```bash
 python create_progress_ring.py <duration_in_seconds>
 ```
-**Example:** `python create_progress_ring.py 45`
 
 ### Step 4: Assemble the Final Video
 
@@ -85,12 +86,7 @@ python assemble_video.py <routine_file> <source_video> <output_video> [options]
 - `--start 300`: Start using the source video from the 5-minute mark (300 seconds).
 - `--end 1800`: Do not use any footage past the 30-minute mark.
 
-**Example 1: Full Quality Render**
+**Example: Full Quality Render of a Single Segment**
 ```bash
-python assemble_video.py routine.yaml "D:/Video/raw.MOV" "final_video.mp4"
-```
-
-**Example 2: Fast Test Render of a Single Segment for Debugging**
-```bash
-python assemble_video.py routine.yaml "D:/Video/raw.MOV" "test.mp4" --segments 5 --test --verbose
+python assemble_video.py routine.yaml "D:/Video/raw.MOV" "final_video.mp4" --segments 1
 ```
