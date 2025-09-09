@@ -89,7 +89,8 @@ def assemble_video(
         timer_file = os.path.join(paths_cfg.get('asset_output_dir', '.'), paths_cfg.get('timers_subdir', 'timers'), f'timer_{timer_duration}s.mov')
         use_timer = os.path.exists(timer_file)
         
-        ffmpeg_cmd = ['ffmpeg', '-y', '-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda']
+        ffmpeg_cmd = ['ffmpeg', '-y', '-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda',
+                      '-threads', '1', '-filter_threads', '0', '-extra_hw_frames', '8']
         if finish_cfg.get('denoise', {}).get('enabled', False) and finish_cfg.get('denoise', {}).get('backend', 'cpu').lower() == 'opencl':
             ocl_device = cfg.get('opencl', {}).get('device', '0.0')
             ffmpeg_cmd += ['-init_hw_device', f'opencl=ocl:{ocl_device}', '-filter_hw_device', 'ocl']
@@ -102,19 +103,31 @@ def assemble_video(
             print("    - WARNING: Timer not found. Skipping overlay.")
 
         print("  > Step 2/3: Building FFmpeg command...")
+        target_res = video_cfg['resolution']               # e.g. '3840x2160'
+        W, H = target_res.split('x')
+        target_res_colon = f"{W}:{H}"
         
-        cpu_filters = ["[0:v]hwdownload,format=p010le,setpts=PTS-STARTPTS"]
-        
+        # 1) Base: download from GPU and set PTS
+        cpu_filters = ["[gpu_scaled]hwdownload,format=p010le,setpts=PTS-STARTPTS"]
+
+        # 2) (MOVE HERE) Framing: crop BEFORE zscale/LUT, with even-aligned offsets
+        framing_method = video_cfg.get('framing_method', 'scale').lower()
+        if framing_method == 'crop':
+            print("    - Framing: Cropping to center (CPU).")
+            cpu_filters.append(
+                f"crop={W}:{H}:floor((iw-{W})/4)*2:floor((ih-{H})/4)*2"
+            )
+
+        # 3) Color pipeline AFTER crop (unchanged)
         apply_lut, lut_file = source_cfg.get('apply_lut', False), source_cfg.get('lut_file')
         if apply_lut and lut_file and os.path.exists(lut_file):
             print("    - Applying LUT and Color Transform (CPU).")
             lut_path = lut_file.replace('\\', '/').replace(':', '\\:')
-            cpu_filters.extend([f"zscale=rin=full:r=full:matrix=709:p=2020:t=arib-std-b67", f"lut3d=file='{lut_path}'", f"zscale=p=709:t=709:m=709:r=limited,format=yuv420p"])
-        
-        framing_method = video_cfg.get('framing_method', 'scale').lower()
-        if framing_method == 'crop':
-            print("    - Framing: Cropping to center (CPU).")
-            cpu_filters.append(f"crop={video_cfg['resolution'].replace('x',':')}")
+            cpu_filters.extend([
+                "zscale=rin=full:r=full:matrix=709:p=2020:t=arib-std-b67",
+                f"lut3d=file='{lut_path}'",
+                "zscale=p=709:t=709:m=709:r=limited,format=yuv420p",
+            ])
         
         sharpen_cfg = finish_cfg.get('sharpen', {})
         if sharpen_cfg.get('enabled', False) and sharpen_cfg.get('backend', 'cpu').lower() == 'cpu':
@@ -124,7 +137,10 @@ def assemble_video(
 
         base_filter_chain = ",".join(cpu_filters)
         last_stream = "[cpu_processed]"
-        filter_complex_chains = [base_filter_chain + last_stream]
+        # First, scale on GPU to (at least) target size, then proceed on CPU
+        filter_complex_chains = [f"[0:v]scale_cuda={target_res_colon}:force_original_aspect_ratio=increase[gpu_scaled]",
+                                 base_filter_chain + last_stream]
+
 
         gpu_filters_used, gpu_filters = False, []
         denoise_cfg = finish_cfg.get('denoise', {})
@@ -169,6 +185,27 @@ def assemble_video(
         final_cmd_args = ['-filter_complex', filter_complex, '-map', '[final_v]', '-map', '0:a:0?', '-c:v', video_cfg['codec'], '-preset', video_cfg['preset'], '-cq', str(video_cfg['quality']), '-c:a', video_cfg['audio_codec'], '-b:a', video_cfg['audio_bitrate']]
         if video_cfg.get('audio_channels', 1) == 2: final_cmd_args.extend(['-af', 'pan=stereo|c0=c0|c1=c0'])
         if test_mode and 'framerate' in video_cfg: final_cmd_args.extend(['-r', str(video_cfg['framerate'])])
+
+        # --- Option A: quality-biased NVENC tweaks (both h264_nvenc / hevc_nvenc) ---
+        if video_cfg.get('codec') in ('h264_nvenc', 'hevc_nvenc'):
+            # Lookahead + AQ generally help motion/detail retention at the same CQ.
+            final_cmd_args += [
+                '-rc-lookahead', str(video_cfg.get('rc_lookahead', 20)),
+                '-spatial_aq', '1',
+                '-temporal_aq', '1',
+                '-aq-strength', str(video_cfg.get('aq_strength', 8)),
+                '-rc', 'vbr',
+                '-tune', 'hq',
+                '-multipass', video_cfg.get('multipass', 'fullres'),
+                '-bf', str(video_cfg.get('b_frames', 3)),
+            ]
+            # Profile (scoped to video to avoid the “ambiguous” warning)
+            if video_cfg.get('codec') == 'h264_nvenc':
+                final_cmd_args += ['-profile:v', video_cfg.get('h264_profile', 'high')]
+            elif video_cfg.get('codec') == 'hevc_nvenc':
+                # Your pipeline outputs 8-bit yuv420p, so HEVC Main is the right default.
+                final_cmd_args += ['-profile:v', video_cfg.get('hevc_profile', 'main')]
+
         
         ffmpeg_cmd.extend(final_cmd_args)
         ffmpeg_cmd.extend(['-t', str(length), output_segment_file])

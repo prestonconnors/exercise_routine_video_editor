@@ -3,13 +3,13 @@
 # Placeholders are in the format %%PLACEHOLDER_NAME%%
 
 # --- STAGE 1: Source Video Processing ---
-# This chain takes the hardware-decoded video [0:v], processes it on the CPU,
-# and prepares it for overlays or GPU filters.
+# GPU pre-scale first (optional), then download to CPU and CROP BEFORE color/LUT.
 [0:v]
+%%GPU_PRESCALE%%
 hwdownload,format=p010le,
 setpts=PTS-STARTPTS
-%%LUT_FILTER%%
 %%FRAMING_FILTER%%
+%%LUT_FILTER%%
 %%SHARPEN_FILTER%%
 [base_processed];
 
