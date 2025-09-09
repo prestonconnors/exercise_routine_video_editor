@@ -11,13 +11,14 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
 - **Automated Asset Generation:** A script (`create_progress_ring.py`) automatically generates high-quality, reusable animated timer assets.
 - **Professional Color & Finishing Pipeline:**
   - **Color Grading:** Automatically applies a specified `.cube` LUT with a color-accurate filter chain for V-Log to Rec.709 conversion.
-  - **Finishing Filters:** Apply optional, configurable denoising and sharpening for a final professional polish.
+  - **Finishing Filters:** Apply optional, configurable denoising (with CPU or OpenCL GPU backends) and sharpening for a final professional polish.
 - **Configurable Audio Processing:** Automatically convert mono microphone tracks to stereo.
 - **Flexible Overlay Positioning:** Place overlays anywhere using FFmpeg's positioning expressions in the config file.
-- **Configurable Framing:** Choose to either `crop` a center-cut from your source video (preserving aspect ratio) or `scale` it to fit, with an option for GPU-accelerated scaling.
+- **Configurable Framing:** Choose to either `crop` a center-cut from your source video (preserving aspect ratio) or `scale` it to fit.
+- **Automatic Title Casing:** Exercise names are automatically converted to Title Case for a clean, consistent look.
 - **Powerful Rendering Options:**
-  - **Test Mode:** Generate a fast, low-quality preview with the `--test` flag to check timings and placement.
-  - **Verbose Mode:** See the full FFmpeg command and its live output for deep debugging with the `--verbose` flag.
+  - **Test Mode:** Generate a fast, low-quality preview with the `--test` flag.
+  - **Verbose Mode:** See the full FFmpeg command and its live output with the `--verbose` flag.
   - **Partial Rendering:** Re-render specific segments of your routine with the `--segments` flag.
   - **Source Trimming:** Extract a routine from a long source video using `--start` and `--end` time commands.
 
@@ -41,13 +42,12 @@ Your project folder should be set up like this:
 ### 1. Prerequisites
 
 - **Python 3.8+**
-- **FFmpeg:** Must be installed and accessible in your system's PATH. (A custom build via [Media-Autobuild Suite](https://github.com/m-ab-s/media-autobuild_suite) is recommended for enabling optional CUDA filters like `nlmeans_cuda`).
+- **FFmpeg:** Must be installed and accessible in your system's PATH. (A custom build via [Media-Autobuild Suite](https://github.com/m-ab-s/media-autobuild_suite) is recommended for enabling optional GPU filters like `nlmeans_opencl`).
 - An NVIDIA GPU is recommended for speed. If you don't have one, change relevant `backend` and `codec` settings in `config.yaml` to `cpu` and `libx264`.
 
 ### 2. Install Python Dependencies
 
-In your terminal, navigate to the project folder and run:
-```bash
+In your terminal, navigate to the project folder and run:```bash
 pip install -r requirements.txt
 ```
 
@@ -80,7 +80,7 @@ python assemble_video.py <routine_file> <source_video> <output_video> [options]
 
 **Options:**
 - `--test`: Generate a fast, low-quality preview.
-- `--verbose`: Show the full FFmpeg command and its live output.
+- `--verbose` or `-v`: Show the full FFmpeg command and its live output.
 - `--segments "1,3,5"`: Process only specific segments (1-based index).
 - `--start 300`: Start using the source video from the 5-minute mark (300 seconds).
 - `--end 1800`: Do not use any footage past the 30-minute mark.

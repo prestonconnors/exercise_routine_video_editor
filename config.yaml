@@ -6,7 +6,11 @@
 paths:
   asset_output_dir: 'assets'
   timers_subdir: 'timers'
+  filter_script_template: 'filter_template.txt'
 
+opencl:
+  device: "0.0"   # NVIDIA CUDA / GeForce RTX 3070 Ti Laptop GPU
+  
 # -- Section 2: Source Video Processing --
 # Defines filters to apply to the main source video (e.g., your GH6 footage)
 source_video_processing:
@@ -16,20 +20,17 @@ source_video_processing:
   # The full path to your .cube, .3dl, or other LUT file.
   lut_file: 'C:/Users/Preston Connors/Downloads/VLog_to_V709_forV35_EN/VLog_to_V709_forV35_ver100.cube'
 
-# -- Section 3: Finishing Filters --
-# Optional, high-quality filters applied after color grading for a final professional polish.
+# -- Section 3: Finishing Filters -- (MODIFIED)
 finishing_filters:
   denoise:
     enabled: true
-    # Choose the filter backend: 'cpu' (universal), 'cuda', or 'opencl'.
-    backend: 'cpu' 
-    strength: 1.0 # For 'cpu': 1.0 is gentle. For 'cuda'/'opencl': 1.0 is also gentle.
+    backend: 'opencl' # Use the modern, GPU-accelerated OpenCL backend
+    strength: 1.0 
     
   sharpen:
     enabled: true
-    # Choose the filter backend: 'cpu' or 'cuda'.
-    backend: 'cpu'
-    luma_amount: 0.5 # For both backends, 0.5 is a nice, subtle sharpness.
+    backend: 'cuda'   # We will now use the GPU for sharpening as well
+    luma_amount: 0.5
 
 # -- Section 4: Progress Ring Style --
 progress_ring:

@@ -1,0 +1,50 @@
+# FFmpeg Filter Complex Script Template
+# Comments like this are ignored by FFmpeg.
+# Placeholders are in the format %%PLACEHOLDER_NAME%%
+
+# --- STAGE 1: Source Video Processing ---
+# This chain takes the hardware-decoded video [0:v], processes it on the CPU,
+# and prepares it for overlays or GPU filters.
+[0:v]
+hwdownload,format=p010le,
+setpts=PTS-STARTPTS
+%%LUT_FILTER%%
+%%FRAMING_FILTER%%
+%%SHARPEN_FILTER%%
+[base_processed];
+
+
+# --- STAGE 2: GPU-Based Filtering (Optional) ---
+# This chain takes the processed video, uploads it to the GPU,
+# runs any GPU-native filters, and names the result.
+%%GPU_CHAIN_INPUT%%
+hwupload_cuda
+%%DENOISE_FILTER%%
+[gpu_processed];
+
+
+# --- STAGE 3: Timer Overlay (Optional) ---
+# This chain takes the main video and the timer asset,
+# uploads the timer to the GPU, and performs a hardware overlay.
+%%TIMER_CHAIN_INPUT%%
+[1:v]hwupload_cuda[timer];
+[main_for_overlay][timer]overlay_cuda=x='%%TIMER_POS_X%%':y='%%TIMER_POS_Y%%'[with_timer];
+
+
+# --- STAGE 4: Final Download & Text Overlay ---
+# Takes the final video stream (which might have a timer),
+# downloads it from the GPU, and applies the CPU-based drawtext filter.
+%%FINAL_STREAM_INPUT%%
+hwdownload,format=nv12,
+drawtext=
+    fontfile='%%TEXT_FONT_FILE%%':
+    text='%%TEXT_CONTENT%%':
+    fontsize=%%TEXT_FONT_SIZE%%:
+    fontcolor=%%TEXT_FONT_COLOR%%:
+    box=1:
+    boxcolor=%%TEXT_BOX_COLOR%%:
+    boxborderw=%%TEXT_BOX_BORDER%%:
+    x='%%TEXT_POS_X%%':
+    y='%%TEXT_POS_Y%%',
+setsar=1
+[final_v]
