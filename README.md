@@ -14,6 +14,7 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
   - **Configurable Output:** Choose to render your final video in 8-bit (SDR) or 10-bit (HDR) via the config file.
   - **Color Grading:** Applies a specified `.cube` LUT with a color-accurate filter chain for V-Log to Rec.709 conversion.
   - **Finishing Filters:** Apply optional, configurable denoising and sharpening for a final professional polish.
+- **Robust A/V Synchronization:** The final video assembly uses an advanced concatenation method that re-encodes the full audio track to guarantee perfect sync and eliminate any pops or clicks at segment transitions.
 - **GPU-First Architecture:** The pipeline is optimized to perform as much work as possible on the GPU (decoding, scaling, denoising, encoding) for maximum performance.
 - **Advanced Encoder Tuning:** Fine-tune NVENC settings like lookahead, AQ, and multipass directly from the config for maximum output quality.
 - **Powerful Rendering Options:**
@@ -24,7 +25,6 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
 
 ## Project Structure
 
-Your project folder should be set up like this for the scripts to work correctly:
 ```
 .
 ├── assets/
@@ -56,13 +56,11 @@ pip install -r requirements.txt
 
 ### Step 1: Configure Your Style
 
-Open `config.yaml` and edit the settings. This is where you set everything: fonts, colors, sizes, video resolution, **output bit depth**, framing method, your color grading LUT, and audio settings.
-
-**Note on 10-Bit (HDR):** To render in 10-bit for platforms like YouTube HDR, set `bit_depth: 10` in the `video_output` section. The script will automatically switch to the `hevc_nvenc` (H.265) codec, which is required for HDR delivery.
+Open `config.yaml` and edit the settings. This is where you set everything: fonts, colors, sizes, video resolution, output bit depth, framing method, your color grading LUT, and audio settings.
 
 ### Step 2: Define Your Routine
 
-Open or create a `routine.yaml` file. List each exercise or rest period with its `name` and `length` in seconds.
+Open or create a `routine.yaml` file. List each exercise with its `name` and `length` in seconds.
 
 ### Step 3: Generate Timer Assets
 

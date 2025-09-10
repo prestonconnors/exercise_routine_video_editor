@@ -100,6 +100,7 @@ def assemble_video(
             ocl_device = cfg.get('opencl', {}).get('device', '0.0')
             ffmpeg_cmd += ['-init_hw_device', f'opencl=ocl:{ocl_device}', '-filter_hw_device', 'ocl']
             
+        ffmpeg_cmd += ["-channel_layout:a", "mono"]
         ffmpeg_cmd += ['-ss', str(start_time_in_source), '-to', str(end_time_in_source), '-i', source_video_path]
         if use_timer:
             print("    - Found timer asset.")
@@ -271,7 +272,17 @@ def assemble_video(
         with open(concat_file, 'w', encoding='utf-8') as f:
             for file in segment_files: f.write(f"file '{Path(file).resolve().as_posix()}'\n")
         
-        concat_cmd = ['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_file, '-c', 'copy', output_path]
+        concat_cmd = [
+            'ffmpeg', '-y',
+            '-f', 'concat', '-safe', '0', '-i', concat_file,
+            '-fflags', '+genpts',                 # regenerate continuous PTS
+            '-avoid_negative_ts', 'make_zero',    # drop negative starts
+            '-c:v', 'copy',                       # keep video bit-exact
+            '-c:a', 'aac',                        # re-encode audio once
+            '-af', 'aresample=async=1:first_pts=0',  # make audio PTS start at 0, keep sync
+            output_path
+        ]
+
         if verbose_mode: print("    - Running concat command:", " ".join(concat_cmd))
             
         concat_start_time = time.monotonic()
