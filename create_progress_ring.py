@@ -9,6 +9,13 @@ from PIL import Image, ImageDraw, ImageFont
 
 # --- Helper Functions ---
 
+def parse_hex_color(hex_str):
+    """Parses a hex color string like '#RRGGBB' into an (R, G, B) tuple."""
+    hex_str = hex_str.lstrip('#')
+    if len(hex_str) != 6:
+        return (192, 192, 192) # Default to light gray on error
+    return tuple(int(hex_str[i:i+2], 16) for i in (0, 2, 4))
+
 def generate_base_color():
     """Returns a random, saturated color that is not too close to white."""
     return (random.randint(20, 180), random.randint(20, 180), random.randint(20, 180))
@@ -38,6 +45,9 @@ def parse_color_with_alpha(color_str):
 
 def draw_ring_segment(draw, box, start_angle, end_angle, color, width):
     """Draws a single arc segment of the ring."""
+    # Ensure start_angle is less than end_angle for consistent drawing
+    if start_angle > end_angle:
+        start_angle, end_angle = end_angle, start_angle
     draw.arc(box, start=start_angle, end=end_angle + 0.5, fill=color, width=width)
 
 def draw_countdown_text(draw, center_xy, remaining_seconds, font, **kwargs):
@@ -75,6 +85,7 @@ def create_progress_ring(
     border_width = cfg['border_width']
     size = cfg['size']
     no_text = cfg.get('no_text', False)
+    trail_color = parse_hex_color(cfg.get('trail_color', '#c0c0c0'))
     
     font_cfg = cfg['text']
     font_style = font_cfg['font_style']
@@ -90,11 +101,9 @@ def create_progress_ring(
     used_font = None
     if not no_text:
         try:
-            # CORRECTED: Font size calculation is now based on the final circle size
             total_visible_width = stroke_width + (border_width * 2)
             outer_margin = 4
             inner_space_radius = (size / 2) - outer_margin - total_visible_width
-            # The usable diameter for text is the inner space, minus padding on both sides
             usable_text_diameter = (inner_space_radius - circle_padding) * 2
             calculated_font_size = int(usable_text_diameter * font_cfg['font_size_ratio'])
 
@@ -113,50 +122,90 @@ def create_progress_ring(
     start_color = generate_base_color()
     end_color = (255, 255, 255)
     print(f"Gradient Start Color (RGB): {start_color}")
+    print(f"Trail Color (RGB): {trail_color}")
     
     center_point = (size // 2, size // 2)
     total_frames = duration * fps
     angle_per_frame = 360 / total_frames
     
-    # Create the persistent canvas for the ring animation
-    canvas = Image.new('RGBA', (size, size), (0, 0, 0, 0))
-    draw_on_canvas = ImageDraw.Draw(canvas)
+    # Bounding Boxes for pixel-perfect layers
+    outer_margin = 4
+    box_outer = (outer_margin, outer_margin, size - outer_margin, size - outer_margin)
+    margin_color = outer_margin + border_width
+    box_color = (margin_color, margin_color, size - margin_color, size - margin_color)
+    margin_inner = outer_margin + border_width + stroke_width
+    box_inner = (margin_inner, margin_inner, size - margin_inner, size - margin_inner)
 
     print(f"Configuration: {duration}s @ {fps}fps, Size={size}px, RingStroke={stroke_width}px, Border={border_width}px")
 
-    # --- Frame Generation Loop ---
+    # --- Layer Pre-computation ---
+    # 1. Create the static, light gray trail ring layer
+    trail_ring_layer = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    draw_on_trail = ImageDraw.Draw(trail_ring_layer)
+    
+    start_full_circle = -90
+    end_full_circle = 270
+
+    if border_width > 0:
+        draw_on_trail.arc(box_outer, start=start_full_circle, end=end_full_circle, fill='black', width=border_width)
+        draw_on_trail.arc(box_inner, start=start_full_circle, end=end_full_circle, fill='black', width=border_width)
+    draw_on_trail.arc(box_color, start=start_full_circle, end=end_full_circle, fill=trail_color, width=stroke_width)
+    print("-> Pre-rendered static trail ring layer.")
+
+    # 2. Create the full-gradient ring layer
+    gradient_ring_layer = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    draw_on_gradient = ImageDraw.Draw(gradient_ring_layer)
     for i in range(total_frames):
-        # Draw one new ring segment onto the persistent canvas
         progress = i / total_frames
         color = lerp_color(start_color, end_color, progress)
-        start_angle_offset = -90
-        segment_start_angle = start_angle_offset + (i * angle_per_frame * (1 if direction == 'clockwise' else -1))
-        segment_end_angle = segment_start_angle + (angle_per_frame * (1 if direction == 'clockwise' else -1))
+        dir_mult = 1 if direction == 'clockwise' else -1
         
-        # Explicit Bounding Boxes for pixel-perfect layers
-        outer_margin = 4
-        box_outer = (outer_margin, outer_margin, size - outer_margin, size - outer_margin)
-        margin_color = outer_margin + border_width
-        box_color = (margin_color, margin_color, size - margin_color, size - margin_color)
-        margin_inner = outer_margin + border_width + stroke_width
-        box_inner = (margin_inner, margin_inner, size - margin_inner, size - margin_inner)
-        
-        # Draw layers of the new segment
+        start_angle = -90 + (i * angle_per_frame * dir_mult)
+        end_angle = start_angle + (angle_per_frame * dir_mult)
+
         if border_width > 0:
-            draw_ring_segment(draw_on_canvas, box_outer, segment_start_angle, segment_end_angle, 'black', border_width)
-        draw_ring_segment(draw_on_canvas, box_color, segment_start_angle, segment_end_angle, color, stroke_width)
+            draw_ring_segment(draw_on_gradient, box_outer, start_angle, end_angle, 'black', border_width)
+        draw_ring_segment(draw_on_gradient, box_color, start_angle, end_angle, color, stroke_width)
         if border_width > 0:
-            draw_ring_segment(draw_on_canvas, box_inner, segment_start_angle, segment_end_angle, 'black', border_width)
+            draw_ring_segment(draw_on_gradient, box_inner, start_angle, end_angle, 'black', border_width)
+    print("-> Pre-rendered full gradient ring layer.")
+
+    # --- Frame Generation Loop (using masking) ---
+    for i in range(total_frames):
+        # Start with the trail ring as the base for every frame
+        frame_image = trail_ring_layer.copy()
         
-        # Copy the canvas with the updated ring to a temporary image
-        frame_image = canvas.copy()
+        # Create a mask. It will be left black for the final frame to prevent artifacts.
+        mask = Image.new('L', (size, size), 0)
+
+        # CORRECTED LOGIC: Stop drawing the mask on the final frame of the video segment.
+        # For a 300-frame video (indices 0-299), we stop drawing the mask at frame 299.
+        if i < (total_frames -1):
+            draw_on_mask = ImageDraw.Draw(mask)
+
+            # Calculate the angle range for the *visible* part of the gradient
+            dir_mult = 1 if direction == 'clockwise' else -1
+            current_progress_angle = i * angle_per_frame * dir_mult
+            
+            # Angles for the mask arc
+            start_mask_angle = -90 + current_progress_angle
+            end_mask_angle = -90 + (360 * dir_mult)
+            
+            # Draw a white shape on the mask corresponding to the remaining time
+            if border_width > 0:
+                draw_ring_segment(draw_on_mask, box_outer, start_mask_angle, end_mask_angle, 255, border_width)
+            draw_ring_segment(draw_on_mask, box_color, start_mask_angle, end_mask_angle, 255, stroke_width)
+            if border_width > 0:
+                draw_ring_segment(draw_on_mask, box_inner, start_mask_angle, end_mask_angle, 255, border_width)
+
+        # Paste the gradient layer onto the base using the generated mask.
+        frame_image.paste(gradient_ring_layer, (0, 0), mask)
         
-        # Get a draw context for the temporary image
+        # Get a draw context for the composited image
         draw_on_frame = ImageDraw.Draw(frame_image)
         
         # Draw background circle if enabled
         if not no_text and circle_enabled:
-            # CORRECTED: Calculate radius to be perfectly flush with the ring's inner border
             total_ring_width = stroke_width + (border_width * 2)
             circle_radius = (size / 2) - outer_margin - total_ring_width
             
@@ -171,10 +220,9 @@ def create_progress_ring(
         # Draw countdown text on top of all other layers
         if not no_text:
             remaining_seconds = duration - (i // fps)
-            if hide_on_zero and remaining_seconds > 0:
-                draw_countdown_text(draw_on_frame, center_point, remaining_seconds, used_font, stroke_width=text_stroke_width)
-            elif not hide_on_zero and remaining_seconds >= 0:
-                draw_countdown_text(draw_on_frame, center_point, remaining_seconds, used_font, stroke_width=text_stroke_width)
+            # Only draw the number if we're not hiding it when it hits zero
+            if not (hide_on_zero and remaining_seconds <= 0):
+                 draw_countdown_text(draw_on_frame, center_point, remaining_seconds, used_font, stroke_width=text_stroke_width)
         
         # Save the final composed frame
         frame_path = os.path.join(output_folder, f'frame_{i:05d}.png')
@@ -184,6 +232,7 @@ def create_progress_ring(
         sys.stdout.flush()
 
     print("\n--- PNG Frame Generation Complete ---")
+
 
 # --- Main Execution Block ---
 if __name__ == '__main__':

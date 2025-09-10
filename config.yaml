@@ -36,9 +36,10 @@ finishing_filters:
 progress_ring:
   fps: 60
   direction: 'clockwise'
-  size: 400
+  size: 600
   stroke_width: 30
   border_width: 3
+  trail_color: '#696969' # Dim gray color for the depleted ring trail
   no_text: false 
   position:
     x: 'W-w-250'  # Top-Right Safe Zone
@@ -59,7 +60,7 @@ text_overlays:
   exercise_name:
     font_file: 'C:/Users/Preston Connors/AppData/Local/Microsoft/Windows/Fonts/Roboto-VariableFont_wdth,wght.ttf'
     font_style: 'ExtraBold' # Bolder for titles
-    font_size: 120
+    font_size: 180
     font_color: 'white'
     box_color: 'black@0.7'
     box_border_width: 15
