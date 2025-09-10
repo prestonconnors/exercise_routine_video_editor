@@ -24,6 +24,11 @@ def prepare_text_for_ffmpeg(text: str, line_width: int = 25) -> str:
     wrapped_text = "\n".join(wrapped_lines)
     return sanitize_text_for_ffmpeg(wrapped_text)
 
+def probe_pix_fmt(path):
+    cmd = ['ffprobe','-v','error','-select_streams','v:0',
+           '-show_entries','stream=pix_fmt','-of','default=nw=1:nk=1', path]
+    return subprocess.check_output(cmd, text=True).strip()
+
 # --- Main Logic ---
 def assemble_video(
     config_path: str,
@@ -106,9 +111,23 @@ def assemble_video(
         target_res = video_cfg['resolution']               # e.g. '3840x2160'
         W, H = target_res.split('x')
         target_res_colon = f"{W}:{H}"
+
+        in_pix = probe_pix_fmt(source_video_path)  # you already have this variable
+        input_is_10bit = '10' in in_pix  # e.g., 'yuv420p10le'
+
+        bit_depth = int(video_cfg.get('bit_depth', 8))
+        pix_fmt = 'p010le' if bit_depth == 10 else 'yuv420p'
+        gpu_upload_fmt = 'p010le'  if bit_depth == 10 else 'nv12'
+        cpu_download_fmt = 'p010le' if input_is_10bit else 'nv12'
+
+        # Safety: H.264 NVENC is 8-bit only. If 10-bit requested, switch to HEVC.
+        if bit_depth == 10 and video_cfg.get('codec') == 'h264_nvenc':
+            print("  > WARNING: 10-bit requested but h264_nvenc is 8-bit only. Switching to hevc_nvenc.")
+            video_cfg['codec'] = 'hevc_nvenc'
+
         
         # 1) Base: download from GPU and set PTS
-        cpu_filters = ["[gpu_scaled]hwdownload,format=p010le,setpts=PTS-STARTPTS"]
+        cpu_filters = [f"[gpu_scaled]hwdownload,format={cpu_download_fmt},setpts=PTS-STARTPTS"]
 
         # 2) (MOVE HERE) Framing: crop BEFORE zscale/LUT, with even-aligned offsets
         framing_method = video_cfg.get('framing_method', 'scale').lower()
@@ -126,7 +145,7 @@ def assemble_video(
             cpu_filters.extend([
                 "zscale=rin=full:r=full:matrix=709:p=2020:t=arib-std-b67",
                 f"lut3d=file='{lut_path}'",
-                "zscale=p=709:t=709:m=709:r=limited,format=yuv420p",
+                f"zscale=p=709:t=709:m=709:r=limited,format={pix_fmt}",
             ])
         
         sharpen_cfg = finish_cfg.get('sharpen', {})
@@ -157,19 +176,20 @@ def assemble_video(
             gpu_filters.append(f"scale_cuda={video_cfg['resolution']}")
         
         if gpu_filters_used:
-            gpu_chain = f"{last_stream}format=nv12,hwupload_cuda,{','.join(gpu_filters)}[gpu_processed]"
+            gpu_chain = f"{last_stream}format={gpu_upload_fmt},hwupload_cuda,{','.join(gpu_filters)}[gpu_processed]"
             filter_complex_chains.append(gpu_chain)
             last_stream = "[gpu_processed]"
 
         if use_timer:
             pos = ring_cfg.get('position', {})
-            filter_complex_chains.append(f"[{timer_input_index}:v]scale={ring_cfg['size']}:-1,format=yuva420p[timer]")
+            timer_pix_fmt = 'yuva444p10le' if video_cfg.get('bit_depth') == 10 else 'yuva420p'
+            filter_complex_chains.append(f"[{timer_input_index}:v]scale={ring_cfg['size']}:-1,format={timer_pix_fmt}[timer]")
             filter_complex_chains.append(f"{last_stream}[timer]overlay=x='{pos.get('x', '(W-w)/2')}':y='{pos.get('y', '50')}'[with_timer]")
             last_stream = "[with_timer]"
         
         final_chain_parts = []
         if last_stream == "[gpu_processed]":
-            final_chain_parts.append("hwdownload,format=yuv420p")
+            final_chain_parts.append(f"hwdownload,format={pix_fmt}")
             
         clean_text = prepare_text_for_ffmpeg(name, title_cfg.get('wrap_at_char', 25))
         font_path = title_cfg.get('font_file', '').replace('\\', '/').replace(':', '\\:')
@@ -182,7 +202,13 @@ def assemble_video(
         
         filter_complex = ";".join(filter_complex_chains)
         
-        final_cmd_args = ['-filter_complex', filter_complex, '-map', '[final_v]', '-map', '0:a:0?', '-c:v', video_cfg['codec'], '-preset', video_cfg['preset'], '-cq', str(video_cfg['quality']), '-c:a', video_cfg['audio_codec'], '-b:a', video_cfg['audio_bitrate']]
+        final_cmd_args = ['-filter_complex', filter_complex, '-map', '[final_v]', '-map', '0:a:0?', '-c:v', video_cfg['codec'], '-preset', video_cfg['preset'], '-cq', str(video_cfg['quality']), '-pix_fmt', pix_fmt, '-c:a', video_cfg['audio_codec'], '-b:a', video_cfg['audio_bitrate']]
+        final_cmd_args.extend([
+            '-color_range', 'tv',
+            '-colorspace', 'bt709',
+            '-color_primaries', 'bt709',
+            '-color_trc', 'bt709',
+        ])
         if video_cfg.get('audio_channels', 1) == 2: final_cmd_args.extend(['-af', 'pan=stereo|c0=c0|c1=c0'])
         if test_mode and 'framerate' in video_cfg: final_cmd_args.extend(['-r', str(video_cfg['framerate'])])
 
@@ -203,8 +229,9 @@ def assemble_video(
             if video_cfg.get('codec') == 'h264_nvenc':
                 final_cmd_args += ['-profile:v', video_cfg.get('h264_profile', 'high')]
             elif video_cfg.get('codec') == 'hevc_nvenc':
-                # Your pipeline outputs 8-bit yuv420p, so HEVC Main is the right default.
-                final_cmd_args += ['-profile:v', video_cfg.get('hevc_profile', 'main')]
+                hevc_prof = video_cfg.get('hevc_profile', 'main10' if bit_depth == 10 else 'main')
+                final_cmd_args += ['-profile:v', hevc_prof]
+
 
         
         ffmpeg_cmd.extend(final_cmd_args)

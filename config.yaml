@@ -69,6 +69,7 @@ text_overlays:
 
 # -- Section 6: Final Video Output Settings --
 video_output:
+  bit_depth: 10
   framing_method: 'crop'     # 'crop' or 'scale'
   framing_backend: 'cuda'    # 'cuda' or 'cpu' (only for scaling)
   resolution: '3840x2160'
