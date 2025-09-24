@@ -12,24 +12,19 @@ opencl:
   device: "0.0"   # NVIDIA CUDA / GeForce RTX 3070 Ti Laptop GPU
 
 # -- Section 2: Source Video Processing --
-# Defines filters to apply to the main source video (e.g., your GH6 footage)
 source_video_processing:
-  # Set to true to enable the LUT. This is essential for V-Log footage.
   apply_lut: true
-  
-  # The full path to your .cube, .3dl, or other LUT file.
   lut_file: 'C:/Users/Preston Connors/Downloads/VLog_to_V709_forV35_EN/VLog_to_V709_forV35_ver100.cube'
 
-# -- Section 3: Finishing Filters -- (MODIFIED)
+# -- Section 3: Finishing Filters --
 finishing_filters:
   denoise:
     enabled: false
-    backend: 'opencl' # Use the modern, GPU-accelerated OpenCL backend
+    backend: 'opencl'
     strength: 1.0 
-    
   sharpen:
     enabled: true
-    backend: 'cuda'   # We will now use the GPU for sharpening as well
+    backend: 'cuda'
     luma_amount: 0.5
 
 # -- Section 4: Progress Ring Style --
@@ -39,11 +34,11 @@ progress_ring:
   size: 600
   stroke_width: 30
   border_width: 3
-  trail_color: '#696969' # Dim gray color for the depleted ring trail
+  trail_color: '#696969'
   no_text: false 
   position:
-    x: 'W-w-250'  # Top-Right Safe Zone
-    y: '250'        # Top-Right Safe Zone
+    x: 'W-w-250'
+    y: '250'
   text:
     font_file: 'C:/Users/Preston Connors/AppData/Local/Microsoft/Windows/Fonts/Inter-VariableFont_opsz,wght.ttf'
     font_style: 'Bold'
@@ -53,40 +48,64 @@ progress_ring:
     background_circle:
       enabled: true
       color: 'black@0.7'
-      padding: 0 # 0 padding makes it flush with the ring
+      padding: 0
 
 # -- Section 5: Text Overlay Styles --
 text_overlays:
   exercise_name:
     font_file: 'C:/Users/Preston Connors/AppData/Local/Microsoft/Windows/Fonts/Roboto-VariableFont_wdth,wght.ttf'
-    font_style: 'ExtraBold' # Bolder for titles
+    font_style: 'ExtraBold'
     font_size: 180
     font_color: 'white'
     box_color: 'black@0.7'
     box_border_width: 15
-    position_x: '250'       # Top-Left Safe Zone
+    position_x: '250'
     position_y: '250'
     wrap_at_char: 20
 
-# -- Section 6: Final Video Output Settings --
+# -- Section 6: Sound Effects --
+sound_effects:
+  # Global volume multiplier for all sound effects (0.0 to 1.0+)
+  master_volume: 0.8
+  
+  # A library of available sound effects.
+  effects:
+    countdown_timer:
+      file: 'assets/sounds/interval_4_seconds.wav'
+      volume: 0.5 # Individual volume multiplier
+      layout: 'stereo'
+
+  # Rules to determine which sound effect plays and when.
+  # The first rule that matches an exercise name will be used.
+  rules:
+    - name: 'countdown_timer'
+      effect: 'countdown_timer'
+      # A list of keywords to look for (case-insensitive) in the exercise name.
+      # A single '*' acts as a wildcard that matches everything.
+      triggers: ['*'] 
+      # Positive: seconds from start. Negative: seconds from end. 'random': anytime.
+      start_time: -4.0
+      # Percentage chance (0-100) that this effect will play on a matching segment.
+      play_percent: 100
+
+# -- Section 7: Final Video Output Settings --
 video_output:
   bit_depth: 10
-  framing_method: 'crop'     # 'crop' or 'scale'
-  framing_backend: 'cuda'    # 'cuda' or 'cpu' (only for scaling)
+  framing_method: 'crop'
+  framing_backend: 'cuda'
   resolution: '3840x2160'
   codec: 'h264_nvenc'
   preset: 'p6'
   quality: 19
   audio_codec: 'aac'
   audio_bitrate: '192k'
-  audio_channels: 2          # 1 = Mono, 2 = Stereo
+  audio_channels: 2
 
-# -- Section 7: Test Mode Overrides --
-# These settings are used INSTEAD of the ones in video_output when --test is used.
+# -- Section 8: Test Mode Overrides --
 test_mode_settings:
-  resolution: '854x480'  # 480p
+  resolution: '854x480'
   framerate: 15
   codec: 'h264_nvenc'
-  preset: 'p1'           # Fastest
-  quality: 28            # Lower quality
+  preset: 'p1'
+  quality: 28
   audio_bitrate: '96k'

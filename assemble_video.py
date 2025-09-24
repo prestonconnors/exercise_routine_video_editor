@@ -5,6 +5,7 @@ import textwrap
 import subprocess
 import argparse
 import time
+import random
 from pathlib import Path
 import shutil
 
@@ -60,6 +61,7 @@ def assemble_video(
     ring_cfg = cfg.get('progress_ring', {})
     source_cfg = cfg.get('source_video_processing', {})
     finish_cfg = cfg.get('finishing_filters', {})
+    sfx_cfg = cfg.get('sound_effects', {})
     
     if test_mode:
         print("\n--- 🧪 TEST MODE ENABLED 🧪 ---")
@@ -89,10 +91,22 @@ def assemble_video(
         print(f"\nProcessing Segment {segment_number}/{len(routine)}: '{name}' ({length}s)")
         print(f"  > Source time: {start_time_in_source:.2f}s -> {end_time_in_source:.2f}s")
         
-        print(f"  > Step 1/3: Checking for timer asset...")
+        print(f"  > Step 1/3: Checking for assets...")
         timer_duration = int(length)
         timer_file = os.path.join(paths_cfg.get('asset_output_dir', '.'), paths_cfg.get('timers_subdir', 'timers'), f'timer_{timer_duration}s.mov')
         use_timer = os.path.exists(timer_file)
+        if use_timer: print("    - Found timer asset.")
+        else: print("    - WARNING: Timer not found. Skipping overlay.")
+        
+        sfx_rule_to_apply, sfx_file = None, None
+        sfx_input_index, current_input_index = -1, 1
+        if sfx_cfg.get('rules') and sfx_cfg.get('effects'):
+            for rule in sfx_cfg['rules']:
+                triggers = rule.get('triggers', [])
+                if any(trigger == '*' or trigger.lower() in name.lower() for trigger in triggers):
+                    if random.random() < rule.get('play_percent', 100) / 100.0:
+                        sfx_rule_to_apply = rule
+                        break
         
         ffmpeg_cmd = ['ffmpeg', '-y', '-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda',
                       '-threads', '1', '-filter_threads', '0', '-extra_hw_frames', '8']
@@ -100,155 +114,117 @@ def assemble_video(
             ocl_device = cfg.get('opencl', {}).get('device', '0.0')
             ffmpeg_cmd += ['-init_hw_device', f'opencl=ocl:{ocl_device}', '-filter_hw_device', 'ocl']
             
-        ffmpeg_cmd += ["-channel_layout:a", "mono"]
         ffmpeg_cmd += ['-ss', str(start_time_in_source), '-to', str(end_time_in_source), '-i', source_video_path]
+
         if use_timer:
-            print("    - Found timer asset.")
-            ffmpeg_cmd.extend(['-i', timer_file]); timer_input_index = 1
-        else:
-            print("    - WARNING: Timer not found. Skipping overlay.")
+            ffmpeg_cmd.extend(['-i', timer_file]); timer_input_index = current_input_index; current_input_index += 1
+        
+        if sfx_rule_to_apply:
+            effect_name = sfx_rule_to_apply['effect']
+            effect_details = sfx_cfg['effects'].get(effect_name, {})
+            sfx_file = effect_details.get('file')
+            sfx_layout = effect_details.get('layout', 'stereo')
+            if sfx_file and os.path.exists(sfx_file):
+                print(f"    - Applying sound effect: '{effect_name}'")
+                ffmpeg_cmd.extend(['-channel_layout', sfx_layout, '-i', sfx_file])
+                sfx_input_index = current_input_index
+                current_input_index += 1
+            else:
+                print(f"    - WARNING: Sound effect '{effect_name}' file not found. Skipping.")
+                sfx_rule_to_apply = None
 
         print("  > Step 2/3: Building FFmpeg command...")
-        target_res = video_cfg['resolution']               # e.g. '3840x2160'
-        W, H = target_res.split('x')
-        target_res_colon = f"{W}:{H}"
-
-        in_pix = probe_pix_fmt(source_video_path)  # you already have this variable
-        input_is_10bit = '10' in in_pix  # e.g., 'yuv420p10le'
-
+        target_res = video_cfg['resolution']; W, H = target_res.split('x'); target_res_colon = f"{W}:{H}"
+        in_pix = probe_pix_fmt(source_video_path)
         bit_depth = int(video_cfg.get('bit_depth', 8))
         pix_fmt = 'p010le' if bit_depth == 10 else 'yuv420p'
-        gpu_upload_fmt = 'p010le'  if bit_depth == 10 else 'nv12'
-        cpu_download_fmt = 'p010le' if input_is_10bit else 'nv12'
+        cpu_download_fmt = 'p010le' if '10' in in_pix else 'nv12'
 
-        # Safety: H.264 NVENC is 8-bit only. If 10-bit requested, switch to HEVC.
-        if bit_depth == 10 and video_cfg.get('codec') == 'h264_nvenc':
-            print("  > WARNING: 10-bit requested but h264_nvenc is 8-bit only. Switching to hevc_nvenc.")
+        if bit_depth == 10 and 'h264' in video_cfg.get('codec', ''):
             video_cfg['codec'] = 'hevc_nvenc'
 
-        
-        # 1) Base: download from GPU and set PTS
         cpu_filters = [f"[gpu_scaled]hwdownload,format={cpu_download_fmt},setpts=PTS-STARTPTS"]
-
-        # 2) (MOVE HERE) Framing: crop BEFORE zscale/LUT, with even-aligned offsets
-        framing_method = video_cfg.get('framing_method', 'scale').lower()
-        if framing_method == 'crop':
-            print("    - Framing: Cropping to center (CPU).")
-            cpu_filters.append(
-                f"crop={W}:{H}:floor((iw-{W})/4)*2:floor((ih-{H})/4)*2"
-            )
-
-        # 3) Color pipeline AFTER crop (unchanged)
+        if video_cfg.get('framing_method') == 'crop':
+            cpu_filters.append(f"crop={W}:{H}:floor((iw-{W})/4)*2:floor((ih-{H})/4)*2")
+        
         apply_lut, lut_file = source_cfg.get('apply_lut', False), source_cfg.get('lut_file')
         if apply_lut and lut_file and os.path.exists(lut_file):
-            print("    - Applying LUT and Color Transform (CPU).")
             lut_path = lut_file.replace('\\', '/').replace(':', '\\:')
-            cpu_filters.extend([
-                "zscale=rin=full:r=full:matrix=709:p=2020:t=arib-std-b67",
-                f"lut3d=file='{lut_path}'",
-                f"zscale=p=709:t=709:m=709:r=limited,format={pix_fmt}",
-            ])
+            cpu_filters.extend([ "zscale=rin=full:r=full:matrix=709:p=2020:t=arib-std-b67", f"lut3d=file='{lut_path}'", f"zscale=p=709:t=709:m=709:r=limited,format={pix_fmt}", ])
         
         sharpen_cfg = finish_cfg.get('sharpen', {})
-        if sharpen_cfg.get('enabled', False) and sharpen_cfg.get('backend', 'cpu').lower() == 'cpu':
-            amount = sharpen_cfg.get('luma_amount', 0.5)
-            print(f"    - Applying Sharpen (CPU).")
-            cpu_filters.append(f"unsharp=lx=3:ly=3:la={amount}")
+        if sharpen_cfg.get('enabled', False):
+             cpu_filters.append(f"unsharp=lx=3:ly=3:la={sharpen_cfg.get('luma_amount', 0.5)}")
 
-        base_filter_chain = ",".join(cpu_filters)
         last_stream = "[cpu_processed]"
-        # First, scale on GPU to (at least) target size, then proceed on CPU
-        filter_complex_chains = [f"[0:v]scale_cuda={target_res_colon}:force_original_aspect_ratio=increase[gpu_scaled]",
-                                 base_filter_chain + last_stream]
-
-
-        gpu_filters_used, gpu_filters = False, []
-        denoise_cfg = finish_cfg.get('denoise', {})
-        if denoise_cfg.get('enabled', False) and denoise_cfg.get('backend', 'cpu').lower() == 'opencl':
-            strength = denoise_cfg.get('strength', 1.0)
-            print(f"    - Applying Denoise (GPU: OpenCL).")
-            ocl_chain = f"{last_stream}format=yuv420p,hwupload,nlmeans_opencl=s={strength},hwdownload,format=yuv420p[ocl_done]"
-            filter_complex_chains.append(ocl_chain)
-            last_stream = "[ocl_done]"
-            
-        if framing_method != 'crop' and video_cfg.get('framing_backend', 'cpu').lower() == 'cuda':
-            gpu_filters_used = True
-            print(f"    - Framing: Scaling to fit (GPU).")
-            gpu_filters.append(f"scale_cuda={video_cfg['resolution']}")
+        filter_complex_chains = [f"[0:v]scale_cuda={target_res_colon}:force_original_aspect_ratio=increase[gpu_scaled]", ",".join(cpu_filters) + last_stream]
         
-        if gpu_filters_used:
-            gpu_chain = f"{last_stream}format={gpu_upload_fmt},hwupload_cuda,{','.join(gpu_filters)}[gpu_processed]"
-            filter_complex_chains.append(gpu_chain)
-            last_stream = "[gpu_processed]"
-
         if use_timer:
-            pos = ring_cfg.get('position', {})
-            timer_pix_fmt = 'yuva444p10le' if video_cfg.get('bit_depth') == 10 else 'yuva420p'
-            filter_complex_chains.append(f"[{timer_input_index}:v]scale={ring_cfg['size']}:-1,format={timer_pix_fmt}[timer]")
-            filter_complex_chains.append(f"{last_stream}[timer]overlay=x='{pos.get('x', '(W-w)/2')}':y='{pos.get('y', '50')}'[with_timer]")
+            pos = ring_cfg.get('position', {}); timer_pix_fmt = 'yuva444p10le' if bit_depth == 10 else 'yuva420p'
+            filter_complex_chains.extend([f"[{timer_input_index}:v]scale={ring_cfg['size']}:-1,format={timer_pix_fmt}[timer]", f"{last_stream}[timer]overlay=x='{pos.get('x', '(W-w)/2')}':y='{pos.get('y', '50')}'[with_timer]"])
             last_stream = "[with_timer]"
         
-        final_chain_parts = []
-        if last_stream == "[gpu_processed]":
-            final_chain_parts.append(f"hwdownload,format={pix_fmt}")
-            
         clean_text = prepare_text_for_ffmpeg(name, title_cfg.get('wrap_at_char', 25))
         font_path = title_cfg.get('font_file', '').replace('\\', '/').replace(':', '\\:')
-        final_chain_parts.append(f"drawtext=fontfile='{font_path}':text='{clean_text}':fontsize={title_cfg.get('font_size',80)}:fontcolor={title_cfg.get('font_color','white')}:box=1:boxcolor={title_cfg.get('box_color','black@0.7')}:boxborderw={title_cfg.get('box_border_width',15)}:x='{title_cfg.get('position_x','(w-text_w)/2')}':y='{title_cfg.get('position_y','h*0.8')}'")
-        final_chain_parts.append("setsar=1[final_v]")
+        video_chain_suffix = f"drawtext=fontfile='{font_path}':text='{clean_text}':fontsize={title_cfg.get('font_size',80)}:fontcolor={title_cfg.get('font_color','white')}:box=1:boxcolor={title_cfg.get('box_color','black@0.7')}:boxborderw={title_cfg.get('box_border_width',15)}:x='{title_cfg.get('position_x','(w-text_w)/2')}':y='{title_cfg.get('position_y','h*0.8')}',setsar=1[final_v]"
+        filter_complex_chains.append(f"{last_stream}{video_chain_suffix}")
         
-        final_filters_str = ",".join(final_chain_parts)
-        final_chain = f"{last_stream}{final_filters_str}"
-        filter_complex_chains.append(final_chain)
+        # --- CORRECTED AUDIO GRAPH LOGIC ---
+        audio_map_target = "0:a:0?" # Default: map the first audio stream from the source directly.
+        last_audio_stream = "[0:a:0]" # Start with the first audio stream from input 0
+
+        if sfx_rule_to_apply and sfx_input_index != -1:
+            start_time = sfx_rule_to_apply.get('start_time', 0.0); delay_ms = 0
+            if isinstance(start_time, (int, float)): 
+                delay_ms = int((length - abs(start_time) if start_time < 0 else start_time) * 1000)
+            elif start_time == 'random': delay_ms = random.randint(0, int(length * 1000))
+
+            sfx_details = sfx_cfg['effects'][sfx_rule_to_apply['effect']]
+            sfx_vol = sfx_details.get('volume', 1.0) * sfx_cfg.get('master_volume', 1.0)
+            
+            # This multi-line string defines the mixing chain. Its output is [mixed_a]
+            mix_chain = (
+                f"[0:a:0]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[main_a];"
+                f"[{sfx_input_index}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume={sfx_vol:.2f}[sfx_a];"
+                f"[sfx_a]adelay={delay_ms}|{delay_ms}[delayed_sfx];"
+                f"[main_a][delayed_sfx]amix=inputs=2:duration=first:dropout_transition=1[mixed_a]"
+            )
+            filter_complex_chains.append(mix_chain)
+            last_audio_stream = "[mixed_a]" # The next filter's input is the result of the mix
+            audio_map_target = None # We MUST map from the filter graph now, not the source.
         
+        # Build the final processing chain for audio (e.g., pan)
+        final_audio_filters = []
+        if video_cfg.get('audio_channels', 1) == 2:
+            final_audio_filters.append("pan=stereo|c0=c0|c1=c0")
+        
+        if final_audio_filters or audio_map_target is None:
+            # If we have filters to apply, or if we *must* map from the filter graph (due to amix),
+            # then create a final filter chain.
+            chain_str = ",".join(final_audio_filters)
+            filter_complex_chains.append(f"{last_audio_stream}{chain_str}[final_a]")
+            audio_map_target = "[final_a]" # Update target to the output of this chain
+
+        # --- END CORRECTED AUDIO LOGIC ---
+
         filter_complex = ";".join(filter_complex_chains)
-        
-        final_cmd_args = ['-filter_complex', filter_complex, '-map', '[final_v]', '-map', '0:a:0?', '-c:v', video_cfg['codec'], '-preset', video_cfg['preset'], '-cq', str(video_cfg['quality']), '-pix_fmt', pix_fmt, '-c:a', video_cfg['audio_codec'], '-b:a', video_cfg['audio_bitrate']]
-        final_cmd_args.extend([
-            '-color_range', 'tv',
-            '-colorspace', 'bt709',
-            '-color_primaries', 'bt709',
-            '-color_trc', 'bt709',
-        ])
-        if video_cfg.get('audio_channels', 1) == 2: final_cmd_args.extend(['-af', 'pan=stereo|c0=c0|c1=c0'])
-        if test_mode and 'framerate' in video_cfg: final_cmd_args.extend(['-r', str(video_cfg['framerate'])])
 
-        # --- Option A: quality-biased NVENC tweaks (both h264_nvenc / hevc_nvenc) ---
+        final_cmd_args = ['-filter_complex', filter_complex, '-map', '[final_v]', '-map', audio_map_target]
+        final_cmd_args.extend(['-c:v', video_cfg['codec'], '-preset', video_cfg['preset'], '-cq', str(video_cfg['quality']), '-pix_fmt', pix_fmt, '-c:a', video_cfg['audio_codec'], '-b:a', video_cfg['audio_bitrate'], '-color_range', 'tv', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709'])
+        
         if video_cfg.get('codec') in ('h264_nvenc', 'hevc_nvenc'):
-            # Lookahead + AQ generally help motion/detail retention at the same CQ.
-            final_cmd_args += [
-                '-rc-lookahead', str(video_cfg.get('rc_lookahead', 20)),
-                '-spatial_aq', '1',
-                '-temporal_aq', '1',
-                '-aq-strength', str(video_cfg.get('aq_strength', 8)),
-                '-rc', 'vbr',
-                '-tune', 'hq',
-                '-multipass', video_cfg.get('multipass', 'fullres'),
-                '-bf', str(video_cfg.get('b_frames', 3)),
-            ]
-            # Profile (scoped to video to avoid the “ambiguous” warning)
-            if video_cfg.get('codec') == 'h264_nvenc':
-                final_cmd_args += ['-profile:v', video_cfg.get('h264_profile', 'high')]
-            elif video_cfg.get('codec') == 'hevc_nvenc':
-                hevc_prof = video_cfg.get('hevc_profile', 'main10' if bit_depth == 10 else 'main')
-                final_cmd_args += ['-profile:v', hevc_prof]
+            final_cmd_args += ['-rc-lookahead', '20', '-spatial_aq', '1', '-temporal_aq', '1', '-aq-strength', '8', '-rc', 'vbr', '-tune', 'hq', '-multipass', 'fullres', '-bf', '3']
+            if video_cfg.get('codec') == 'hevc_nvenc': final_cmd_args += ['-profile:v', 'main10' if bit_depth == 10 else 'main']
 
-
-        
-        ffmpeg_cmd.extend(final_cmd_args)
-        ffmpeg_cmd.extend(['-t', str(length), output_segment_file])
+        ffmpeg_cmd.extend(final_cmd_args); ffmpeg_cmd.extend(['-t', str(length), output_segment_file])
         
         if verbose_mode:
-            print("    - Assembled FFmpeg command:")
-            temp_cmd = ffmpeg_cmd.copy()
-            temp_cmd[temp_cmd.index('-filter_complex') + 1] = f'"{temp_cmd[temp_cmd.index("-filter_complex") + 1]}"'
-            print("      " + " ".join(temp_cmd))
+            print("    - Assembled FFmpeg command:"); print(f"      {' '.join(ffmpeg_cmd)}")
         
         print("  > Step 3/3: Encoding with FFmpeg...")
         encoding_start_time = time.monotonic()
         try:
-            if verbose_mode: subprocess.run(ffmpeg_cmd, check=True)
-            else: subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True, encoding='utf-8')
+            subprocess.run(ffmpeg_cmd, check=True, capture_output=not verbose_mode, text=True, encoding='utf-8')
             print(f"    - Done. Segment encoded in {time.monotonic() - encoding_start_time:.2f}s.")
             segment_files.append(output_segment_file)
         except subprocess.CalledProcessError as e:
@@ -272,76 +248,42 @@ def assemble_video(
         with open(concat_file, 'w', encoding='utf-8') as f:
             for file in segment_files: f.write(f"file '{Path(file).resolve().as_posix()}'\n")
         
-        concat_cmd = [
-            'ffmpeg', '-y',
-            '-f', 'concat', '-safe', '0', '-i', concat_file,
-            '-fflags', '+genpts',                 # regenerate continuous PTS
-            '-avoid_negative_ts', 'make_zero',    # drop negative starts
-            '-c:v', 'copy',                       # keep video bit-exact
-            '-c:a', 'aac',                        # re-encode audio once
-            '-af', 'aresample=async=1:first_pts=0',  # make audio PTS start at 0, keep sync
-            output_path
-        ]
-
+        concat_cmd = [ 'ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_file, '-c:v', 'copy', '-c:a', 'aac', '-af', 'aresample=async=1:first_pts=0', output_path ]
         if verbose_mode: print("    - Running concat command:", " ".join(concat_cmd))
             
-        concat_start_time = time.monotonic()
         try:
-            if verbose_mode: subprocess.run(concat_cmd, check=True)
-            else: subprocess.run(concat_cmd, check=True, capture_output=True, text=True, encoding='utf-8')
-            print(f"  > Concatenation finished in {time.monotonic() - concat_start_time:.2f}s.")
+            subprocess.run(concat_cmd, check=True, capture_output=not verbose_mode, text=True, encoding='utf-8')
+            print(f"  > Concatenation finished successfully.")
         except subprocess.CalledProcessError as e:
-            print(f"  > FATAL: FFmpeg failed during concatenation.")
             if not verbose_mode: print("  > FFmpeg error output (stderr):", e.stderr)
             sys.exit(1)
-        try: os.remove(concat_file)
-        except OSError: pass
+        finally:
+             if os.path.exists(concat_file): os.remove(concat_file)
 
     print("\n--- 🧹 Cleaning Up Temporary Files ---")
-    cleanup_files = segment_files
-    for file in cleanup_files:
-        try: os.remove(file)
-        except OSError: pass
+    for file in segment_files:
+        if os.path.exists(file): os.remove(file)
     
     total_duration = time.monotonic() - total_start_time
     print(f"\n✅ Video assembly complete! Final video saved to: {output_path}")
     print(f"   Total time taken: {total_duration:.2f} seconds.")
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description="Creates a complete exercise video from a source file and a routine plan.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    
+    parser = argparse.ArgumentParser( description="Creates a complete exercise video from a source file and a routine plan.", formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     parser.add_argument("routine_path", help="Path to routine YAML file.")
     parser.add_argument("source_video", help="Path to source video file.")
     parser.add_argument("output_video", help="Path for final output video.")
-    
     parser.add_argument("--start", type=float, default=0.0, help="Start time in source video (seconds).")
     parser.add_argument("--end", type=float, help="End time in source video (seconds).")
     parser.add_argument("--segments", type=str, help="Comma-separated list of segments to process (e.g., '1,3,5').")
-    
     parser.add_argument("--test", action="store_true", help="Enable test mode for a fast, low-quality preview render.")
     parser.add_argument("--verbose", "-v", action="store_true", help="Show the full FFmpeg command and its real-time output.")
     parser.add_argument("--config", type=str, default='config.yaml', help="Path to config file.")
-    
     args = parser.parse_args()
     
     segments_to_run = None
     if args.segments:
-        try:
-            segments_to_run = [int(s.strip()) for s in args.segments.split(',')]
-        except ValueError:
-            sys.exit("FATAL: Invalid --segments format. Please provide comma-separated numbers (e.g., '1,3,5').")
+        try: segments_to_run = [int(s.strip()) for s in args.segments.split(',')]
+        except ValueError: sys.exit("FATAL: Invalid --segments format. Please provide comma-separated numbers (e.g., '1,3,5').")
 
-    assemble_video(
-        config_path=args.config,
-        routine_path=args.routine_path,
-        source_video_path=args.source_video,
-        output_path=args.output_video,
-        segments_to_process=segments_to_run,
-        source_start_offset=args.start,
-        source_end_limit=args.end,
-        test_mode=args.test,
-        verbose_mode=args.verbose
-    )
+    assemble_video( config_path=args.config, routine_path=args.routine_path, source_video_path=args.source_video, output_path=args.output_video, segments_to_process=segments_to_run, source_start_offset=args.start, source_end_limit=args.end, test_mode=args.test, verbose_mode=args.verbose )
