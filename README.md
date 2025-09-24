@@ -7,6 +7,7 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
 ## Features
 
 - **Centralized Styling:** All visual elements (colors, fonts, sizes, positions) are controlled in a single `config.yaml` file.
+- **Efficient Re-rendering:** The pipeline automatically detects and reuses previously rendered video segments, only encoding new or changed portions.
 - **Rule-Based Sound Effects:**
   - Define a library of sound effects with individual volume and channel layout settings.
   - Create rules to automatically play sounds based on keywords in the exercise name.
@@ -24,6 +25,7 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
   - **Test Mode:** Generate a fast, low-quality preview with the `--test` flag.
   - **Verbose Mode:** See the full FFmpeg command and its live output with the `--verbose` flag.
   - **Partial Rendering:** Re-render specific segments of your routine with the `--segments` flag.
+  - **Force Re-rendering:** Ignore existing temporary files and re-encode all segments with `--force-render`.
   - **Source Trimming:** Extract a routine from a long source video using `--start` and `--end`.
 
 ## Project Structure
@@ -46,7 +48,7 @@ Your project folder should be set up like this for the scripts to work correctly
 ### 1. Prerequisites
 
 - **Python 3.8+**
-- **FFmpeg:** Must be installed and accessible in your system's PATH.
+- **FFmpeg & FFprobe:** Must be installed and accessible in your system's PATH.
 - **NVIDIA GPU with CUDA Toolkit installed.**
 
 ### 2. Install Python Dependencies
@@ -91,11 +93,18 @@ python assemble_video.py <routine_file> <source_video> <output_video> [options]
 ```
 
 **Example 1: Full Quality Render of an Entire Routine**
+The first time you run this, it will encode every segment. If you run it again, it will reuse those segments, making assembly nearly instantaneous.
 ```bash
 python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "final_video.mp4"
 ```
 
-**Example 2: Fast Test Render of a Single Segment for Debugging**
+**Example 2: Force Re-render of the Entire Video**
+Use this if you've changed a setting in `config.yaml` and need to regenerate all segments.
+```bash
+python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "final_video_v2.mp4" --force-render
+```
+
+**Example 3: Fast Test Render of a Single Segment**
 This command is perfect for quickly checking the style, overlays, and sound effect timing.
 ```bash
 python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "test_preview.mp4" --segments 5 --test --verbose
