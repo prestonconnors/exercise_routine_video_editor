@@ -110,10 +110,7 @@ def assemble_video(
         
         ffmpeg_cmd = ['ffmpeg', '-y', '-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda',
                       '-threads', '1', '-filter_threads', '0', '-extra_hw_frames', '8']
-        if finish_cfg.get('denoise', {}).get('enabled', False) and finish_cfg.get('denoise', {}).get('backend', 'cpu').lower() == 'opencl':
-            ocl_device = cfg.get('opencl', {}).get('device', '0.0')
-            ffmpeg_cmd += ['-init_hw_device', f'opencl=ocl:{ocl_device}', '-filter_hw_device', 'ocl']
-            
+        
         ffmpeg_cmd += ['-ss', str(start_time_in_source), '-to', str(end_time_in_source), '-i', source_video_path]
 
         if use_timer:
@@ -147,10 +144,17 @@ def assemble_video(
         if video_cfg.get('framing_method') == 'crop':
             cpu_filters.append(f"crop={W}:{H}:floor((iw-{W})/4)*2:floor((ih-{H})/4)*2")
         
-        apply_lut, lut_file = source_cfg.get('apply_lut', False), source_cfg.get('lut_file')
-        if apply_lut and lut_file and os.path.exists(lut_file):
-            lut_path = lut_file.replace('\\', '/').replace(':', '\\:')
-            cpu_filters.extend([ "zscale=rin=full:r=full:matrix=709:p=2020:t=arib-std-b67", f"lut3d=file='{lut_path}'", f"zscale=p=709:t=709:m=709:r=limited,format={pix_fmt}", ])
+        apply_lut, lut_files = source_cfg.get('apply_lut', False), source_cfg.get('lut_files', [])
+        if apply_lut and isinstance(lut_files, list) and lut_files:
+            cpu_filters.append("zscale=rin=full:r=full:matrix=709:p=2020:t=arib-std-b67")
+            for lut_file in lut_files:
+                if os.path.exists(lut_file):
+                    print(f"    - Applying LUT: {os.path.basename(lut_file)}")
+                    lut_path = lut_file.replace('\\', '/').replace(':', '\\:')
+                    cpu_filters.append(f"lut3d=file='{lut_path}'")
+                else:
+                    print(f"    - WARNING: LUT file not found, skipping: {lut_file}")
+            cpu_filters.append(f"zscale=p=709:t=709:m=709:r=limited,format={pix_fmt}")
         
         sharpen_cfg = finish_cfg.get('sharpen', {})
         if sharpen_cfg.get('enabled', False):
@@ -160,7 +164,7 @@ def assemble_video(
         filter_complex_chains = [f"[0:v]scale_cuda={target_res_colon}:force_original_aspect_ratio=increase[gpu_scaled]", ",".join(cpu_filters) + last_stream]
         
         if use_timer:
-            pos = ring_cfg.get('position', {}); timer_pix_fmt = 'yuva444p10le' if bit_depth == 10 else 'yuva420p'
+            pos = ring_cfg.get('position', {}); timer_pix_fmt = 'yuva444p10le'
             filter_complex_chains.extend([f"[{timer_input_index}:v]scale={ring_cfg['size']}:-1,format={timer_pix_fmt}[timer]", f"{last_stream}[timer]overlay=x='{pos.get('x', '(W-w)/2')}':y='{pos.get('y', '50')}'[with_timer]"])
             last_stream = "[with_timer]"
         
@@ -170,10 +174,12 @@ def assemble_video(
         filter_complex_chains.append(f"{last_stream}{video_chain_suffix}")
         
         # --- CORRECTED AUDIO GRAPH LOGIC ---
-        audio_map_target = "0:a:0?" # Default: map the first audio stream from the source directly.
-        last_audio_stream = "[0:a:0]" # Start with the first audio stream from input 0
+        audio_map_target = "0:a:0?" 
+        last_audio_stream = "[0:a:0]" 
+        is_complex_audio = False
 
         if sfx_rule_to_apply and sfx_input_index != -1:
+            is_complex_audio = True
             start_time = sfx_rule_to_apply.get('start_time', 0.0); delay_ms = 0
             if isinstance(start_time, (int, float)): 
                 delay_ms = int((length - abs(start_time) if start_time < 0 else start_time) * 1000)
@@ -182,7 +188,6 @@ def assemble_video(
             sfx_details = sfx_cfg['effects'][sfx_rule_to_apply['effect']]
             sfx_vol = sfx_details.get('volume', 1.0) * sfx_cfg.get('master_volume', 1.0)
             
-            # This multi-line string defines the mixing chain. Its output is [mixed_a]
             mix_chain = (
                 f"[0:a:0]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[main_a];"
                 f"[{sfx_input_index}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume={sfx_vol:.2f}[sfx_a];"
@@ -190,20 +195,21 @@ def assemble_video(
                 f"[main_a][delayed_sfx]amix=inputs=2:duration=first:dropout_transition=1[mixed_a]"
             )
             filter_complex_chains.append(mix_chain)
-            last_audio_stream = "[mixed_a]" # The next filter's input is the result of the mix
-            audio_map_target = None # We MUST map from the filter graph now, not the source.
+            last_audio_stream = "[mixed_a]"
         
-        # Build the final processing chain for audio (e.g., pan)
         final_audio_filters = []
-        if video_cfg.get('audio_channels', 1) == 2:
-            final_audio_filters.append("pan=stereo|c0=c0|c1=c0")
+        if video_cfg.get('audio_channels', 2) == 1:
+            final_audio_filters.append("pan=mono|c0=c0")
         
-        if final_audio_filters or audio_map_target is None:
-            # If we have filters to apply, or if we *must* map from the filter graph (due to amix),
-            # then create a final filter chain.
+        if final_audio_filters:
+            is_complex_audio = True
             chain_str = ",".join(final_audio_filters)
             filter_complex_chains.append(f"{last_audio_stream}{chain_str}[final_a]")
-            audio_map_target = "[final_a]" # Update target to the output of this chain
+            audio_map_target = "[final_a]"
+        elif is_complex_audio:
+            # A complex filter was used (e.g. amix), but no *more* filters are needed.
+            # The final audio stream is the output of the last filter in the chain.
+            audio_map_target = last_audio_stream
 
         # --- END CORRECTED AUDIO LOGIC ---
 

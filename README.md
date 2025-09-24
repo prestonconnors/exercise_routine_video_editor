@@ -16,7 +16,7 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
 - **Automated Asset Generation:** A script (`create_progress_ring.py`) automatically generates high-quality, reusable animated timer assets with configurable colors.
 - **Professional 10-Bit HDR Workflow:**
   - **Dynamic Bit Depth:** Automatically detects the bit depth of your source footage and processes the entire pipeline in 10-bit to preserve color fidelity.
-  - **Color Grading:** Applies a specified `.cube` LUT for accurate V-Log conversion.
+  - **Color Grading:** Applies a specified `.cube` LUT for accurate V-Log conversion. Supports chaining multiple LUTs for complex color grading (e.g., technical LUT followed by a creative one).
 - **Robust A/V Synchronization:** The final assembly uses an advanced concatenation method and a sophisticated `amix` audio filter to seamlessly blend sound effects with the source audio, guaranteeing perfect sync.
 - **GPU-First Architecture:** The pipeline is optimized to perform as much work as possible on the GPU (decoding, scaling, encoding) for maximum performance.
 - **Advanced Encoder Tuning:** Fine-tune NVENC settings like lookahead, AQ, and multipass directly from the config for maximum output quality.
@@ -29,8 +29,7 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
 ## Project Structure
 
 Your project folder should be set up like this for the scripts to work correctly:
-```
-.
+```.
 ├── assets/
 │   ├── sounds/  <-- Place your .wav or .mp3 files here
 │   └── timers/
@@ -61,7 +60,7 @@ pip install -r requirements.txt
 
 ### Step 1: Configure Your Style
 
-Open `config.yaml` and edit the settings. This is where you set everything: fonts, colors, video resolution, your color grading LUT, and audio settings.
+Open `config.yaml` and edit the settings. This is where you set everything: fonts, colors, video resolution, your color grading LUT(s), and audio settings.
 
 ### Step 2: (Optional) Add Sound Effects
 
@@ -78,7 +77,8 @@ Open or create a `routine.yaml` file. List each exercise or rest period with its
 
 The assembly script needs a pre-made timer video for each unique duration in your routine. For each unique `length` value, run:
 ```bash
-python create_progress_ring.py <duration_in_seconds>```
+python create_progress_ring.py <duration_in_seconds>
+```
 **Example:** `python create_progress_ring.py 45`
 
 ### Step 5: Assemble the Final Video

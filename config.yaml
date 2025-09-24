@@ -9,12 +9,18 @@ paths:
   filter_script_template: 'filter_template.txt'
 
 opencl:
-  device: "0.0"   # NVIDIA CUDA / GeForce RTX 3070 Ti Laptop GPU
+  device: "0.0"   # e.g., NVIDIA CUDA / GeForce RTX 3070 Ti Laptop GPU
 
 # -- Section 2: Source Video Processing --
 source_video_processing:
   apply_lut: true
-  lut_file: 'C:/Users/Preston Connors/Downloads/VLog_to_V709_forV35_EN/VLog_to_V709_forV35_ver100.cube'
+  # NEW: Changed 'lut_file' to 'lut_files' to allow for multiple sequential LUTs.
+  # They will be applied in the order they are listed.
+  lut_files: 
+    - 'luts/VLog_to_V709_forV35_ver100.cube'
+    #- 'luts/basic_correction.cube'
+    - 'luts/final.cube'
+    # - 'C:/path/to/another/creative_lut.cube' # You can add a second LUT here
 
 # -- Section 3: Finishing Filters --
 finishing_filters:
@@ -65,34 +71,23 @@ text_overlays:
 
 # -- Section 6: Sound Effects --
 sound_effects:
-  # Global volume multiplier for all sound effects (0.0 to 1.0+)
   master_volume: 0.8
-  
-  # A library of available sound effects.
   effects:
     countdown_timer:
       file: 'assets/sounds/interval_4_seconds.wav'
-      volume: 0.5 # Individual volume multiplier
+      volume: 0.5
       layout: 'stereo'
-
-  # Rules to determine which sound effect plays and when.
-  # The first rule that matches an exercise name will be used.
   rules:
     - name: 'countdown_timer'
       effect: 'countdown_timer'
-      # A list of keywords to look for (case-insensitive) in the exercise name.
-      # A single '*' acts as a wildcard that matches everything.
       triggers: ['*'] 
-      # Positive: seconds from start. Negative: seconds from end. 'random': anytime.
       start_time: -4.0
-      # Percentage chance (0-100) that this effect will play on a matching segment.
       play_percent: 100
 
 # -- Section 7: Final Video Output Settings --
 video_output:
   bit_depth: 10
   framing_method: 'crop'
-  framing_backend: 'cuda'
   resolution: '3840x2160'
   codec: 'h264_nvenc'
   preset: 'p6'
@@ -104,7 +99,6 @@ video_output:
 # -- Section 8: Test Mode Overrides --
 test_mode_settings:
   resolution: '854x480'
-  framerate: 15
   codec: 'h264_nvenc'
   preset: 'p1'
   quality: 28
