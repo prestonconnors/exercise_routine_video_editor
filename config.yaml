@@ -84,7 +84,25 @@ sound_effects:
       start_time: -4.0
       play_percent: 100
 
-# -- Section 7: Final Video Output Settings --
+# -- Section 7: Background Music (NEW) --
+background_music:
+  enabled: true
+  master_volume: 0.10      # Lower volume so it doesn't overpower speech
+  music_folder: 'assets/music' # Folder with your .mp3, .wav, etc. files
+  fade_duration: 2.5       # Fade in/out duration for the entire video
+  ducking_enabled: true    # Automatically lower music volume when SFX plays
+  ducking_volume: 0.2      # Volume to duck to (20% of original BGM volume)
+  rules:
+    - name: 'High-Energy Music for Intense Exercise'
+      triggers: ['Burpees', 'Jump Squats', 'Kettlebell Swings']
+      file: 'assets/music/high_energy_track.mp3'
+      mode: 'loop'         # 'loop' for the segment, 'continue' across segments
+    - name: 'Calm Music for Rest'
+      triggers: ['Rest', 'Stretch']
+      file: 'assets/music/calm_track.mp3'
+      mode: 'continue'
+
+# -- Section 8: Final Video Output Settings --
 video_output:
   bit_depth: 10
   framing_method: 'crop'
@@ -96,7 +114,7 @@ video_output:
   audio_bitrate: '192k'
   audio_channels: 2
 
-# -- Section 8: Test Mode Overrides --
+# -- Section 9: Test Mode Overrides --
 test_mode_settings:
   resolution: '854x480'
   codec: 'h264_nvenc'

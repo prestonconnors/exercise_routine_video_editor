@@ -1,6 +1,6 @@
 # Automated Exercise Video Generator
 
-This project is a Python-based pipeline for automatically creating styled exercise videos with dynamic overlays and sound effects. It uses a series of configuration files and scripts to combine a single long video recording with animated timers, title cards, and rule-based audio cues, producing a final, edited video ready for platforms like YouTube.
+This project is a Python-based pipeline for automatically creating styled exercise videos with dynamic overlays, sound effects, and background music. It uses a series of configuration files and scripts to combine a single long video recording with animated timers, title cards, and rule-based audio cues, producing a final, edited video ready for platforms like YouTube.
 
 The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via a central `config.yaml` file, making it incredibly flexible and efficient.
 
@@ -8,33 +8,31 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
 
 - **Centralized Styling:** All visual elements (colors, fonts, sizes, positions) are controlled in a single `config.yaml` file.
 - **Efficient Re-rendering:** The pipeline automatically detects and reuses previously rendered video segments, only encoding new or changed portions.
-- **Rule-Based Sound Effects:**
-  - Define a library of sound effects with individual volume and channel layout settings.
-  - Create rules to automatically play sounds based on keywords in the exercise name.
-  - Trigger effects to play at specific times (e.g., 4 seconds from the end) or at random.
-  - Set a percentage chance for a sound to play, adding variety to your videos.
+- **Rule-Based Sound Effects:** Define a library of sound effects and create rules to automatically play sounds based on keywords in the exercise name.
+- **Dynamic Background Music:**
+  - Automatically select random music from a library folder **and all its subfolders**.
+  - Create rules to assign specific music tracks to exercises (e.g., high-energy music for intense sets, calm music for rests).
+  - Music can either loop for a segment (`mode: loop`) or play continuously across multiple segments (`mode: continue`).
+  - **Audio Ducking:** Professional-grade feature that automatically lowers the music volume when a sound effect plays, ensuring clarity.
+  - **Global Fade:** Apply an automated fade-in at the beginning and fade-out at the end of the final video for a polished finish.
 - **Routine-Based Editing:** Video structure is defined in a simple `routine.yaml` file, listing exercises and their durations.
-- **Automated Asset Generation:** A script (`create_progress_ring.py`) automatically generates high-quality, reusable animated timer assets with configurable colors.
+- **Automated Asset Generation:** The `create_progress_ring.py` script automatically generates high-quality, reusable animated timer assets.
 - **Professional 10-Bit HDR Workflow:**
   - **Dynamic Bit Depth:** Automatically detects the bit depth of your source footage and processes the entire pipeline in 10-bit to preserve color fidelity.
-  - **Color Grading:** Applies a specified `.cube` LUT for accurate V-Log conversion. Supports chaining multiple LUTs for complex color grading (e.g., technical LUT followed by a creative one).
-- **Robust A/V Synchronization:** The final assembly uses an advanced concatenation method and a sophisticated `amix` audio filter to seamlessly blend sound effects with the source audio, guaranteeing perfect sync.
+  - **Advanced Color Grading:** Applies one or more `.cube` LUTs sequentially for accurate technical corrections (e.g., V-Log) and creative looks.
+- **Robust A/V Synchronization:** The final assembly uses an advanced concatenation method and a sophisticated `amix` audio filter graph to seamlessly blend all audio sources, guaranteeing perfect sync.
 - **GPU-First Architecture:** The pipeline is optimized to perform as much work as possible on the GPU (decoding, scaling, encoding) for maximum performance.
-- **Advanced Encoder Tuning:** Fine-tune NVENC settings like lookahead, AQ, and multipass directly from the config for maximum output quality.
-- **Powerful Rendering Options:**
-  - **Test Mode:** Generate a fast, low-quality preview with the `--test` flag.
-  - **Verbose Mode:** See the full FFmpeg command and its live output with the `--verbose` flag.
-  - **Partial Rendering:** Re-render specific segments of your routine with the `--segments` flag.
-  - **Force Re-rendering:** Ignore existing temporary files and re-encode all segments with `--force-render`.
-  - **Source Trimming:** Extract a routine from a long source video using `--start` and `--end`.
+- **Powerful Rendering Options:** Includes test mode (`--test`), verbose output (`-v`), partial rendering (`--segments`), source trimming (`--start`, `--end`), and forced re-rendering (`--force-render`).
 
 ## Project Structure
 
 Your project folder should be set up like this for the scripts to work correctly:
 ```.
 ├── assets/
-│   ├── sounds/  <-- Place your .wav or .mp3 files here
-│   └── timers/
+│   ├── music/        <-- Place your .mp3, .wav, etc. music files here (subfolders are ok)
+│   ├── sounds/       <-- Place your .wav or .mp3 sound effects here
+│   └── timers/       <-- Generated timer assets will be saved here
+├── luts/             <-- Place your .cube LUT files here
 ├── config.yaml
 ├── create_progress_ring.py
 ├── assemble_video.py
@@ -60,16 +58,14 @@ pip install -r requirements.txt
 
 ## Workflow: How to Create a Video
 
-### Step 1: Configure Your Style
+### Step 1: Configure Your Style & Audio
 
-Open `config.yaml` and edit the settings. This is where you set everything: fonts, colors, video resolution, your color grading LUT(s), and audio settings.
+Open `config.yaml` and edit the settings. This is where you set everything: fonts, colors, video resolution, your color grading LUT(s), sound effects, and the new `background_music` options.
 
-### Step 2: (Optional) Add Sound Effects
+### Step 2: Add Audio Assets
 
 1.  Place your sound effect files (e.g., `swoosh.wav`) in the `assets/sounds/` directory.
-2.  Open `config.yaml` and configure the `sound_effects` section.
-    -   Define each audio file in the `effects` library, giving it a name, path, volume, and channel layout.
-    -   Create `rules` to determine when each effect should play.
+2.  Place your background music files (e.g., `workout_mix.mp3`) in the `assets/music/` directory. You can create subfolders inside `music/` to organize your library.
 
 ### Step 3: Define Your Routine
 
@@ -77,7 +73,7 @@ Open or create a `routine.yaml` file. List each exercise or rest period with its
 
 ### Step 4: Generate Timer Assets
 
-The assembly script needs a pre-made timer video for each unique duration in your routine. For each unique `length` value, run:
+The assembly script needs a pre-made timer video for each unique duration in your routine. Run this command for each unique `length` value from your routine file:
 ```bash
 python create_progress_ring.py <duration_in_seconds>
 ```
@@ -98,14 +94,8 @@ The first time you run this, it will encode every segment. If you run it again, 
 python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "final_video.mp4"
 ```
 
-**Example 2: Force Re-render of the Entire Video**
-Use this if you've changed a setting in `config.yaml` and need to regenerate all segments.
+**Example 2: Render a Specific Segment in Test Mode**
+This command is perfect for quickly checking the style, overlays, and audio mix for a single part of your video.
 ```bash
-python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "final_video_v2.mp4" --force-render
-```
-
-**Example 3: Fast Test Render of a Single Segment**
-This command is perfect for quickly checking the style, overlays, and sound effect timing.
-```bash
-python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "test_preview.mp4" --segments 5 --test --verbose
+python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "test_preview.mp4" --segments 3 --test --verbose
 ```
