@@ -23,6 +23,24 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
 
 ## Utility Scripts
 
+### Action Hook Video Creator (New)
+
+The `create_hook.py` script automatically finds the most motion-intensive scenes in your long video and combines them into a short, high-action preview video. This is perfect for creating social media "hooks."
+
+- **Intelligent Scene Detection:** Analyzes the video to find segments with the most motion. Supports optional GPU (OpenCL) acceleration for faster analysis.
+- **Blazing-Fast & Lossless:** Uses FFmpeg stream copy to extract clips without re-encoding, preserving quality and making the process extremely fast.
+- **Highly Customizable:** Control the number of clips, the length of each clip, and the motion detection sensitivity.
+
+**Usage:**
+```bash
+python create_hook.py <source_video> <num_clips> <clip_duration_sec> [options]
+```
+**Example:**
+```bash
+# Find the 5 most active 1-second clips from a workout video
+python create_hook.py "final_video.mp4" 5 1 -o "hook.mp4" --gpu --threshold 0.02
+```
+
 ### Quality-First Music Downloader
 
 Included is `download_music_from_youtube_playlists.py`, a powerful script for downloading high-quality audio tracks for your projects.
@@ -33,7 +51,8 @@ Included is `download_music_from_youtube_playlists.py`, a powerful script for do
 
 **Usage:**
 ```bash
-python download_music_from_youtube_playlists.py "<output_folder>" <youtube_url_or_playlist>```
+python download_music_from_youtube_playlists.py "<output_folder>" <youtube_url_or_playlist>
+```
 **Example:**
 ```bash
 # Download a playlist into the project's music folder
@@ -50,8 +69,9 @@ Your project folder should be set up like this for the scripts to work correctly
 │   └── timers/       <-- Generated timer assets will be saved here
 ├── luts/             <-- Place your .cube LUT files here
 ├── config.yaml
-├── create_progress_ring.py
 ├── assemble_video.py
+├── create_hook.py
+├── create_progress_ring.py
 ├── download_music_from_youtube_playlists.py
 ├── routine.yaml
 ├── requirements.txt

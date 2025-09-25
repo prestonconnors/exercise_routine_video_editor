@@ -35,7 +35,17 @@ This is the main orchestration script that builds the final video.
 5.  **Filter Architecture (GPU-First):** Must perform GPU-native scaling (`scale_cuda`) before downloading the frame for CPU-based filters (`zscale`, `lut3d`, `unsharp`) and overlays (`drawtext`).
 6.  **Robust Final Assembly:** The concatenation step must copy the video stream but re-encode the audio with `aresample` and `afade` filters to guarantee sync and a polished finish.
 
-### 4. `download_music_from_youtube_playlists.py` (New)
+### 4. `create_hook.py` (New Utility)
+
+This utility script automatically creates a short "hook" or "preview" video from a longer source.
+- **Purpose:** Identifies and combines the most motion-intensive clips to generate engaging short-form content.
+- **Process:**
+    1.  **Analyze:** Uses FFmpeg with the `select='gt(scene,threshold)'` filter to score motion. Supports optional OpenCL GPU acceleration.
+    2.  **Parse:** Aggregates scene scores over user-defined time windows to find the periods with the most action.
+    3.  **Extract & Combine:** Uses FFmpeg's fast stream copy (`-c copy`) to perform lossless extraction of the top clips, then concatenates them into the final output video.
+- **Input:** Must accept positional arguments `input`, `num_clips`, `clip_duration`, and optional flags like `--output`, `--threshold`, and `--gpu`.
+
+### 5. `download_music_from_youtube_playlists.py`
 
 This is a utility script to acquire high-quality audio.
 - **Purpose:** Downloads audio from YouTube URLs (single video or playlist) for use as background music in the main pipeline.
@@ -46,7 +56,7 @@ This is a utility script to acquire high-quality audio.
 - **Dependencies:** Requires `yt-dlp` to be installed and `ffmpeg` to be on the system PATH.
 - **Input:** Must accept positional arguments for the output directory and one or more YouTube URLs.
 
-### 5. Documentation
+### 6. Documentation
 
 Provide:
 - A `requirements.txt` file listing:
@@ -56,5 +66,5 @@ Provide:
   yt-dlp
   mutagen
   ```
-- A comprehensive `README.md` file covering both the video generator and the new music downloader utility.
+- A comprehensive `README.md` file covering the video generator and both utility scripts (hook creator and music downloader).
 - The `prompt.md` file itself for project regeneration.
