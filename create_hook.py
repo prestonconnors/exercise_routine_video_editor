@@ -34,7 +34,8 @@ def analyze_video(input_file, threshold, use_gpu=False, cl_device="0.0"):
     command.extend(["-i", input_file])
 
     if use_gpu:
-        filter_chain = f"hwupload,hwdownload,format=p010le,select='gt(scene,{threshold})',metadata=print:file={log_filename}"
+        filter_chain = f"hwupload_cuda,scale_cuda=320:240,hwdownload,fps=15,format=p010le,select='gt(scene,{threshold})',metadata=print:file={log_filename}"
+        #filter_chain = f"hwupload,hwdownload,format=p010le,select='gt(scene,{threshold})',metadata=print:file={log_filename}"
         command.extend(["-filter_hw_device", "ocl", "-vf", filter_chain])
     else:
         filter_chain = f"select='gt(scene,{threshold})',metadata=print:file={log_filename}"

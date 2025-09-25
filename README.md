@@ -23,7 +23,9 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
 
 ## Utility Scripts
 
-### Action Hook Video Creator (New)
+This project includes powerful standalone scripts to prepare assets and create promotional content.
+
+### Action Hook Video Creator
 
 The `create_hook.py` script automatically finds the most motion-intensive scenes in your long video and combines them into a short, high-action preview video. This is perfect for creating social media "hooks."
 
@@ -84,7 +86,7 @@ Your project folder should be set up like this for the scripts to work correctly
 
 - **Python 3.8+**
 - **FFmpeg & FFprobe:** Must be installed and accessible in your system's PATH.
-- **NVIDIA GPU with CUDA Toolkit installed** (for `assemble_video.py`).
+- **NVIDIA GPU with CUDA Toolkit installed** (for `assemble_video.py`). An OpenCL-compatible GPU can be used for `create_hook.py`.
 
 ### 2. Install Python Dependencies
 
