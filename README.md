@@ -10,9 +10,10 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
 - **Efficient Re-rendering:** The pipeline automatically detects and reuses previously rendered video segments, only encoding new or changed portions.
 - **Rule-Based Sound Effects:** Define a library of sound effects and create rules to automatically play sounds based on keywords in the exercise name.
 - **Dynamic Background Music:**
-  - Automatically select random music from a library folder **and all its subfolders**.
-  - Create rules to assign specific music tracks to exercises.
-  - Music can either loop for a segment (`mode: loop`) or play continuously across multiple segments (`mode: continue`).
+  - Creates a continuous "radio mix" style track that plays across segments.
+  - A song continues playing until it ends naturally or a rule forces an interruption.
+  - Supports rule-based playlists by using a `folder:` key to draw random tracks from a specific directory for certain exercises.
+  - **Smooth Transitions:** Automatically crossfades between tracks when a rule forces a song change.
   - **Audio Ducking:** Professional-grade feature that automatically lowers the music volume when a sound effect plays, ensuring clarity.
   - **Global Fade:** Apply an automated fade-in and fade-out at the end of the final video for a polished finish.
 - **Automated Asset Generation:** The `create_progress_ring.py` script automatically generates high-quality, reusable animated timer assets.
@@ -24,6 +25,24 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
 ## Utility Scripts
 
 This project includes powerful standalone scripts to prepare assets and create promotional content.
+
+### Continuous Background Music Creator (New)
+
+The `create_background_music.py` script is a powerful utility that pre-generates the entire background music track for your routine. It analyzes your routine file and `config.yaml` to build a single, continuous audio file with smooth transitions.
+
+- **"Radio Mix" Style Playback:** A song will play across multiple exercise segments until it ends, then a new random song will be chosen.
+- **Rule-Based Playlists:** Use a `folder:` key in your `background_music` rules to create themed playlists (e.g., "high-energy," "cool-down") that automatically trigger for specific exercises.
+- **Automatic Crossfading:** When a rule forces a song to change, the script automatically generates a smooth crossfade between the outgoing and incoming tracks.
+
+**Usage:**
+```bash
+python create_background_music.py <routine_yaml_path> <output_audio_file>
+```
+**Example:**
+```bash
+# Generate the full music track for the Monday routine
+python create_background_music.py "routine.yaml" "background_music.m4a"
+```
 
 ### Action Hook Video Creator
 
@@ -71,11 +90,12 @@ Your project folder should be set up like this for the scripts to work correctly
 │   └── timers/       <-- Generated timer assets will be saved here
 ├── luts/             <-- Place your .cube LUT files here
 ├── config.yaml
+├── routine.yaml
 ├── assemble_video.py
 ├── create_hook.py
 ├── create_progress_ring.py
+├── create_background_music.py   <-- New Script
 ├── download_music_from_youtube_playlists.py
-├── routine.yaml
 ├── requirements.txt
 └── README.md
 ```
@@ -99,19 +119,18 @@ pip install -r requirements.txt
 
 ### Step 1: Download Background Music (Optional)
 
-Use the included downloader to populate your music library.
+Use the included downloader to populate your music library. You can create subfolders for different genres (e.g., `assets/music/high-energy`, `assets/music/calm`).
 ```bash
-python download_music_from_youtube_playlists.py "assets/music" <youtube_url>
-```
+python download_music_from_youtube_playlists.py "assets/music" <youtube_url>```
 
 ### Step 2: Configure Your Style & Audio
 
-Open `config.yaml` and edit the settings. This is where you set everything: fonts, colors, video resolution, your color grading LUT(s), sound effects, and the `background_music` options.
+Open `config.yaml` and edit the settings. This is where you set everything: fonts, colors, video resolution, your color grading LUT(s), sound effects, and the `background_music` rules. Make sure to define your `music_folder` and add any `folder` rules you want.
 
 ### Step 3: Add Audio Assets
 
 1.  Place your sound effect files (e.g., `swoosh.wav`) in the `assets/sounds/` directory.
-2.  Place your background music files (e.g., `workout_mix.flac`) in the `assets/music/` directory. You can create subfolders inside `music/` to organize your library.
+2.  Ensure your background music files are organized in the `assets/music/` directory, matching the folder structure you defined in your config rules.
 
 ### Step 4: Define Your Routine
 
@@ -125,9 +144,16 @@ python create_progress_ring.py <duration_in_seconds>
 ```
 **Example:** `python create_progress_ring.py 45`
 
-### Step 6: Assemble the Final Video
+### Step 6: Generate the Background Music Track
 
-The main script has several powerful options for processing your video.
+Run the new script to create a single audio file for the entire routine. This combines all music and transitions into one track.
+```bash
+python create_background_music.py routine.yaml background_music.m4a
+```
+
+### Step 7: Assemble the Final Video
+
+The main script has several powerful options for processing your video. *(Note: You will later modify this script to accept the `background_music.m4a` file as an input).*
 
 **Command Structure:**
 ```bash
@@ -135,13 +161,11 @@ python assemble_video.py <routine_file> <source_video> <output_video> [options]
 ```
 
 **Example 1: Full Quality Render**
-The first time you run this, it will encode every segment. Subsequent runs will reuse segments, making assembly nearly instantaneous.
 ```bash
 python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "final_video.mp4"
 ```
 
 **Example 2: Test a Single Segment**
-This is perfect for quickly checking the style, overlays, and audio mix for one part of your video.
 ```bash
 python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "test_preview.mp4" --segments 3 --test -v
 ```

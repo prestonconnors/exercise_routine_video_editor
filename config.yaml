@@ -88,8 +88,9 @@ sound_effects:
 background_music:
   enabled: true
   master_volume: 0.10      # Lower volume so it doesn't overpower speech
-  music_folder: 'assets/music' # Folder with your .mp3, .wav, etc. files
+  music_folder: 'assets/music/High Energy' # Folder with your .mp3, .wav, etc. files
   fade_duration: 2.5       # Fade in/out duration for the entire video
+  crossfade_duration: 2.5  # NEW: Duration for crossfades between songs
   ducking_enabled: true    # Automatically lower music volume when SFX plays
   ducking_volume: 0.2      # Volume to duck to (20% of original BGM volume)
   rules:
@@ -98,12 +99,12 @@ background_music:
       file: 'assets/music/high_energy_track.mp3'
       mode: 'loop'         # 'loop' for the segment, 'continue' across segments
     - name: 'Calm Music for Rest'
-      triggers: ['Rest', 'Stretch']
-      file: 'assets/music/calm_track.mp3'
+      triggers: ['Cool Down', 'Outro']
+      folder: 'assets/music/calm'
       mode: 'continue'
     - name: 'Intro Music'
       triggers: ['Intro']
-      file: 'assets/music/Jim Walter - Choose Your Character (The original) [IstvN-NN_9k] (Shortened).wav'
+      folder: 'assets/music/Intro'
       mode: 'continue'
 
 # -- Section 8: Final Video Output Settings --

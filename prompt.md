@@ -53,7 +53,17 @@ This is a utility script to acquire high-quality audio.
 - **Dependencies:** Requires `yt-dlp` to be installed and `ffmpeg` to be on the system PATH.
 - **Input:** Must accept positional arguments for the output directory and one or more YouTube URLs.
 
-### 6. Documentation
+### 6. `create_background_music.py` (New Utility)
+
+This utility pre-generates the entire background audio track for a routine.
+- **Purpose:** Analyzes a `routine.yaml` and `config.yaml` to build a single, continuous audio file for the entire video's duration.
+- **Features:**
+    - **Continuous Playback:** Implements a "radio mix" style where songs play across segments until they finish or a rule forces an interruption.
+    - **Rule-Based Playlists:** Supports `file:` rules for specific tracks and `folder:` rules to draw randomly from a themed playlist.
+    - **Automatic Crossfading:** Seamlessly crossfades between tracks when a song ends or a rule forces a change, using a `crossfade_duration` setting from the config.
+- **Input:** Must accept positional arguments for the routine file and the output audio file.
+
+### 7. Documentation
 
 Provide:
 - A `requirements.txt` file listing:
@@ -62,5 +72,5 @@ Provide:
   Pillow
   yt-dlp
   ```
-- A comprehensive `README.md` file covering the video generator and both utility scripts (hook creator and music downloader).
+- A comprehensive `README.md` file covering the video generator and all utility scripts.
 - The `prompt.md` file itself for project regeneration.
