@@ -16,11 +16,15 @@ def check_ffmpeg():
         print("ERROR: FFmpeg is not installed or not in your system's PATH.")
         return False
 
-def analyze_video(input_file, threshold, use_gpu=False, cl_device="0.0"):
+def analyze_video(input_file, threshold, use_gpu=False, cl_device="0.0", start_time=0.0, end_time=None):
     """
     Analyzes the video file using the correctly quoted filterchain.
     """
     print(f"\n--- PHASE 1: ANALYZING VIDEO FOR MOTION ---")
+    if start_time > 0.0 or end_time is not None:
+        end_str = f" to {end_time}s" if end_time is not None else " until the end"
+        print(f"Analyzing source video from {start_time}s{end_str}")
+
     if use_gpu:
         print(f"Using GPU acceleration for analysis (OpenCL on device {cl_device})")
     else:
@@ -29,9 +33,19 @@ def analyze_video(input_file, threshold, use_gpu=False, cl_device="0.0"):
     log_filename = "scene_scores_temp.log"
     command = ["ffmpeg", "-y"]
 
+    if start_time > 0.0:
+        command.extend(["-ss", str(start_time)])
+
     if use_gpu:
         command.extend(["-init_hw_device", f"opencl=ocl:{cl_device}"])
+    
     command.extend(["-i", input_file])
+
+    if end_time is not None:
+        if end_time <= start_time:
+            print("[ERROR] End time must be greater than start time.")
+            return False
+        command.extend(["-to", str(end_time)])
 
     if use_gpu:
         filter_chain = f"hwupload_cuda,scale_cuda=320:240,hwdownload,fps=15,format=p010le,select='gt(scene,{threshold})',metadata=print:file={log_filename}"
@@ -220,6 +234,8 @@ def main():
     parser.add_argument("clip_duration", type=float, help="The duration of each clip.")
     parser.add_argument("-o", "--output", default="output.mp4", help="Name of the output file. (default: output.mp4)")
     parser.add_argument("-t", "--threshold", type=float, default=0.04, help="Motion detection sensitivity for analysis phase. (default: 0.04)")
+    parser.add_argument("--start", type=float, default=0.0, help="Start time in source video (seconds).")
+    parser.add_argument("--end", type=float, help="End time in source video (seconds).")
     parser.add_argument("--gpu", action="store_true", help="Use GPU (OpenCL) for the analysis phase. Does not affect encoding.")
     parser.add_argument("--cl_device", type=str, default="0.0", help="The OpenCL device to use for analysis. (default: 0.0)")
     parser.add_argument('--transition', choices=['white'], help="Adds a 'dip to white' transition. This requires re-encoding the video.")
@@ -238,7 +254,7 @@ def main():
         print(f"\n[INFO] Found existing '{log_file_path}'. Skipping analysis phase.")
         analysis_completed = True
     else:
-        analysis_completed = analyze_video(args.input, args.threshold, args.gpu, args.cl_device)
+        analysis_completed = analyze_video(args.input, args.threshold, args.gpu, args.cl_device, start_time=args.start, end_time=args.end)
 
     if analysis_completed:
         start_times = find_most_active_clips(log_file_path, args.clip_duration, args.num_clips)

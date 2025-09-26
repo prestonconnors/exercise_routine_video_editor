@@ -101,6 +101,10 @@ background_music:
       triggers: ['Rest', 'Stretch']
       file: 'assets/music/calm_track.mp3'
       mode: 'continue'
+    - name: 'Intro Music'
+      triggers: ['Intro']
+      file: 'assets/music/Jim Walter - Choose Your Character (The original) [IstvN-NN_9k] (Shortened).wav'
+      mode: 'continue'
 
 # -- Section 8: Final Video Output Settings --
 video_output:
