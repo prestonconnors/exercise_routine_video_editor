@@ -55,6 +55,7 @@ def assemble_video(
     routine_path: str,
     source_video_path: str,
     output_path: str,
+    background_music_path: str | None,
     segments_to_process: list[int] | None = None,
     source_start_offset: float = 0.0,
     source_end_limit: float | None = None,
@@ -65,11 +66,11 @@ def assemble_video(
     total_start_time = time.monotonic()
 
     try:
-        with open(config_path, 'r') as f: cfg = yaml.safe_load(f)
+        with open(config_path, 'r', encoding='utf-8') as f: cfg = yaml.safe_load(f)
     except FileNotFoundError:
         sys.exit(f"FATAL: Config file not found at '{config_path}'")
     try:
-        with open(routine_path, 'r') as f: routine = yaml.safe_load(f)
+        with open(routine_path, 'r', encoding='utf-8') as f: routine = yaml.safe_load(f)
     except FileNotFoundError:
         sys.exit(f"FATAL: Routine file not found at '{routine_path}'")
     if not os.path.exists(source_video_path):
@@ -82,6 +83,7 @@ def assemble_video(
     source_cfg = cfg.get('source_video_processing', {})
     finish_cfg = cfg.get('finishing_filters', {})
     sfx_cfg = cfg.get('sound_effects', {})
+    bgm_cfg = cfg.get('background_music', {})
 
     if test_mode:
         print("\n--- 🧪 TEST MODE ENABLED 🧪 ---")
@@ -129,37 +131,46 @@ def assemble_video(
         if use_timer: print("    - Found timer asset.")
         else: print("    - WARNING: Timer not found. Skipping overlay.")
 
-        sfx_rule_to_apply, sfx_file = None, None
-        sfx_input_index, current_input_index = -1, 1
-        if sfx_cfg.get('rules') and sfx_cfg.get('effects'):
-            for rule in sfx_cfg['rules']:
-                triggers = rule.get('triggers', [])
-                if any(trigger == '*' or trigger.lower() in name.lower() for trigger in triggers):
-                    if random.random() < rule.get('play_percent', 100) / 100.0:
-                        sfx_rule_to_apply = rule
-                        break
-
         ffmpeg_cmd = ['ffmpeg', '-y', '-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda',
                       '-threads', '1', '-filter_threads', '0', '-extra_hw_frames', '8']
 
+        # Input 0: Main video
         ffmpeg_cmd += ['-ss', str(start_time_in_source), '-to', str(end_time_in_source), '-i', source_video_path]
+        
+        current_input_index = 1
+        timer_input_index = sfx_input_index = bgm_input_index = -1
 
+        # Input 1 (optional): Timer overlay
         if use_timer:
             ffmpeg_cmd.extend(['-i', timer_file]); timer_input_index = current_input_index; current_input_index += 1
+        
+        # Input 2 (optional): Background music
+        use_bgm = background_music_path and os.path.exists(background_music_path) and bgm_cfg.get('enabled', False)
+        if use_bgm:
+            print("    - Found background music.")
+            ffmpeg_cmd.extend(['-ss', str(routine_elapsed_time), '-i', background_music_path])
+            bgm_input_index = current_input_index; current_input_index += 1
+        elif background_music_path:
+            print("    - WARNING: Background music file specified but 'enabled' is false in config or file not found. Skipping BGM.")
 
+        # Input 3 (optional): Sound Effect
+        sfx_rule_to_apply, sfx_file = None, None
+        if sfx_cfg.get('rules') and sfx_cfg.get('effects'):
+            for rule in sfx_cfg['rules']:
+                if any(trigger == '*' or trigger.lower() in name.lower() for trigger in rule.get('triggers', [])):
+                    if random.random() < rule.get('play_percent', 100) / 100.0:
+                        sfx_rule_to_apply = rule; break
+        
         if sfx_rule_to_apply:
             effect_name = sfx_rule_to_apply['effect']
             effect_details = sfx_cfg['effects'].get(effect_name, {})
-            sfx_file = effect_details.get('file')
-            sfx_layout = effect_details.get('layout', 'stereo')
+            sfx_file = effect_details.get('file'); sfx_layout = effect_details.get('layout', 'stereo')
             if sfx_file and os.path.exists(sfx_file):
                 print(f"    - Applying sound effect: '{effect_name}'")
                 ffmpeg_cmd.extend(['-channel_layout', sfx_layout, '-i', sfx_file])
-                sfx_input_index = current_input_index
-                current_input_index += 1
+                sfx_input_index = current_input_index; current_input_index += 1
             else:
-                print(f"    - WARNING: Sound effect '{effect_name}' file not found. Skipping.")
-                sfx_rule_to_apply = None
+                print(f"    - WARNING: Sound effect '{effect_name}' file not found. Skipping."); sfx_rule_to_apply = None
 
         print("  > Step 2/3: Building FFmpeg command...")
         target_res = video_cfg['resolution']; W, H = target_res.split('x'); target_res_colon = f"{W}:{H}"
@@ -172,90 +183,93 @@ def assemble_video(
             print("  > INFO: Switching to HEVC codec for 10-bit output.")
             video_cfg['codec'] = 'hevc_nvenc'
 
-        cpu_filters = [f"[gpu_scaled]hwdownload,format={cpu_download_fmt},setpts=PTS-STARTPTS"]
-        if video_cfg.get('framing_method') == 'crop':
-            cpu_filters.append(f"crop={W}:{H}:floor((iw-{W})/4)*2:floor((ih-{H})/4)*2")
+        filter_complex_chains = []
 
+        # --- VIDEO GRAPH LOGIC (unchanged) ---
+        cpu_filters = [f"[gpu_scaled]hwdownload,format={cpu_download_fmt},setpts=PTS-STARTPTS"]
+        if video_cfg.get('framing_method') == 'crop': cpu_filters.append(f"crop={W}:{H}:floor((iw-{W})/4)*2:floor((ih-{H})/4)*2")
         apply_lut, lut_files = source_cfg.get('apply_lut', False), source_cfg.get('lut_files', [])
+        sharpen_cfg = finish_cfg.get('sharpen', {})
         if apply_lut and isinstance(lut_files, list) and lut_files:
             cpu_filters.append("zscale=rin=full:r=full:matrix=709:p=2020:t=arib-std-b67")
             for lut_file in lut_files:
                 if os.path.exists(lut_file):
-                    print(f"    - Applying LUT: {os.path.basename(lut_file)}")
-                    lut_path = lut_file.replace('\\', '/').replace(':', '\\:')
-                    cpu_filters.append(f"lut3d=file='{lut_path}'")
-                else:
-                    print(f"    - WARNING: LUT file not found, skipping: {lut_file}")
+                    print(f"    - Applying LUT: {os.path.basename(lut_file)}"); lut_path = lut_file.replace('\\', '/').replace(':', '\\:'); cpu_filters.append(f"lut3d=file='{lut_path}'")
+                else: print(f"    - WARNING: LUT file not found, skipping: {lut_file}")
             cpu_filters.append(f"zscale=p=709:t=709:m=709:r=limited,format={pix_fmt}")
-
-        sharpen_cfg = finish_cfg.get('sharpen', {})
-        if sharpen_cfg.get('enabled', False):
-             cpu_filters.append(f"unsharp=lx=3:ly=3:la={sharpen_cfg.get('luma_amount', 0.5)}")
-
+        if sharpen_cfg.get('enabled', False): cpu_filters.append(f"unsharp=lx=3:ly=3:la={sharpen_cfg.get('luma_amount', 0.5)}")
         last_stream = "[cpu_processed]"
-        filter_complex_chains = [f"[0:v]scale_cuda={target_res_colon}:force_original_aspect_ratio=increase[gpu_scaled]", ",".join(cpu_filters) + last_stream]
-
+        filter_complex_chains.extend([f"[0:v]scale_cuda={target_res_colon}:force_original_aspect_ratio=increase[gpu_scaled]", ",".join(cpu_filters) + last_stream])
         if use_timer:
-            pos = ring_cfg.get('position', {}); timer_pix_fmt = 'yuva444p10le'
-            filter_complex_chains.extend([f"[{timer_input_index}:v]scale={ring_cfg['size']}:-1,format={timer_pix_fmt}[timer]", f"{last_stream}[timer]overlay=x='{pos.get('x', '(W-w)/2')}':y='{pos.get('y', '50')}'[with_timer]"])
-            last_stream = "[with_timer]"
-
-        clean_text = prepare_text_for_ffmpeg(name, title_cfg.get('wrap_at_char', 25))
-        font_path = title_cfg.get('font_file', '').replace('\\', '/').replace(':', '\\:')
+            pos = ring_cfg.get('position', {}); timer_pix_fmt = 'yuva444p10le'; filter_complex_chains.extend([f"[{timer_input_index}:v]scale={ring_cfg['size']}:-1,format={timer_pix_fmt}[timer]", f"{last_stream}[timer]overlay=x='{pos.get('x', '(W-w)/2')}':y='{pos.get('y', '50')}'[with_timer]"]); last_stream = "[with_timer]"
+        clean_text = prepare_text_for_ffmpeg(name, title_cfg.get('wrap_at_char', 25)); font_path = title_cfg.get('font_file', '').replace('\\', '/').replace(':', '\\:')
         video_chain_suffix = f"drawtext=fontfile='{font_path}':text='{clean_text}':fontsize={title_cfg.get('font_size',80)}:fontcolor={title_cfg.get('font_color','white')}:box=1:boxcolor={title_cfg.get('box_color','black@0.7')}:boxborderw={title_cfg.get('box_border_width',15)}:x='{title_cfg.get('position_x','(w-text_w)/2')}':y='{title_cfg.get('position_y','h*0.8')}',setsar=1[final_v]"
         filter_complex_chains.append(f"{last_stream}{video_chain_suffix}")
 
-        # --- AUDIO GRAPH LOGIC ---
-        audio_map_target = "0:a:0?"
-        last_audio_stream = "[0:a:0]"
-        is_complex_audio = False
-
-        if sfx_rule_to_apply and sfx_input_index != -1:
-            is_complex_audio = True
-            start_time = sfx_rule_to_apply.get('start_time', 0.0); delay_ms = 0
-            if isinstance(start_time, (int, float)):
-                delay_ms = int((length - abs(start_time) if start_time < 0 else start_time) * 1000)
-            elif start_time == 'random': delay_ms = random.randint(0, int(length * 1000))
-
+        # --- REBUILT AUDIO GRAPH LOGIC ---
+        audio_streams_to_mix, audio_filter_chains = [], []
+        
+        # 1. Prepare main audio stream
+        audio_filter_chains.append("[0:a:0]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[main_a]")
+        audio_streams_to_mix.append("[main_a]")
+        
+        # 2. Prepare BGM and SFX streams
+        bgm_stream_for_mixing, sfx_stream_for_mixing = "", ""
+        if use_bgm:
+            bgm_vol = float(bgm_cfg.get('master_volume', 1.0))
+            audio_filter_chains.append(f"[{bgm_input_index}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume={bgm_vol:.2f}[bgm_vol]")
+            bgm_stream_for_mixing = "[bgm_vol]"
+        
+        if sfx_rule_to_apply:
             sfx_details = sfx_cfg['effects'][sfx_rule_to_apply['effect']]
             sfx_vol = sfx_details.get('volume', 1.0) * sfx_cfg.get('master_volume', 1.0)
+            delay_ms = 0; start_time = sfx_rule_to_apply.get('start_time', 0.0)
+            if isinstance(start_time, (int, float)): delay_ms = int((length - abs(start_time) if start_time < 0 else start_time) * 1000)
+            elif start_time == 'random': delay_ms = random.randint(0, int(length * 1000))
+            audio_filter_chains.append(f"[{sfx_input_index}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume={sfx_vol:.2f},adelay={delay_ms}|{delay_ms}[delayed_sfx]")
+            sfx_stream_for_mixing = "[delayed_sfx]"
 
-            mix_chain = (
-                f"[0:a:0]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[main_a];"
-                f"[{sfx_input_index}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume={sfx_vol:.2f}[sfx_a];"
-                f"[sfx_a]adelay={delay_ms}|{delay_ms}[delayed_sfx];"
-                f"[main_a][delayed_sfx]amix=inputs=2:duration=first:dropout_transition=1[mixed_a]"
-            )
-            filter_complex_chains.append(mix_chain)
-            last_audio_stream = "[mixed_a]"
+        # 3. Handle Ducking (Sidechain Compression)
+        ducking_enabled = bgm_cfg.get('ducking_enabled', False)
+        if use_bgm and sfx_stream_for_mixing and ducking_enabled:
+            duck_vol_ratio = bgm_cfg.get('ducking_volume', 0.2)
+            audio_filter_chains.append(f"{sfx_stream_for_mixing}asplit[sfx_mix][sfx_sc]")
+            sfx_stream_for_mixing = "[sfx_mix]" # Update stream for final mix
+            
+            # ** THE FIX IS HERE **
+            # Removed the extra brackets from [{bgm_stream_for_mixing}]
+            audio_filter_chains.append(f"{bgm_stream_for_mixing}[sfx_sc]sidechaincompress=threshold=0.01:ratio=5:level_sc={duck_vol_ratio}[bgm_ducked]")
+            bgm_stream_for_mixing = "[bgm_ducked]" # Update stream for final mix
 
-        final_audio_filters = []
+        # 4. Final Mixdown
+        if bgm_stream_for_mixing: audio_streams_to_mix.append(bgm_stream_for_mixing)
+        if sfx_stream_for_mixing: audio_streams_to_mix.append(sfx_stream_for_mixing)
+        
+        final_audio_stream = "[main_a]" # Default to main audio if no mixing happens
+        if len(audio_streams_to_mix) > 1:
+            mix_inputs_str = "".join(audio_streams_to_mix)
+            audio_filter_chains.append(f"{mix_inputs_str}amix=inputs={len(audio_streams_to_mix)}:duration=first:dropout_transition=1[mixed_a]")
+            final_audio_stream = "[mixed_a]"
+        
+        # 5. Mono conversion (if needed)
+        audio_map_target = final_audio_stream
         if video_cfg.get('audio_channels', 2) == 1:
-            final_audio_filters.append("pan=mono|c0=c0")
-
-        if final_audio_filters:
-            is_complex_audio = True
-            chain_str = ",".join(final_audio_filters)
-            filter_complex_chains.append(f"{last_audio_stream}{chain_str}[final_a]")
+            audio_filter_chains.append(f"{final_audio_stream}pan=mono|c0=c0[final_a]")
             audio_map_target = "[final_a]"
-        elif is_complex_audio:
-            audio_map_target = last_audio_stream
-
+            
+        filter_complex_chains.extend(audio_filter_chains)
         # --- END AUDIO LOGIC ---
-
+        
         filter_complex = ";".join(filter_complex_chains)
 
         final_cmd_args = ['-filter_complex', filter_complex, '-map', '[final_v]', '-map', audio_map_target]
         final_cmd_args.extend(['-c:v', video_cfg['codec'], '-preset', video_cfg['preset'], '-cq', str(video_cfg['quality']), '-pix_fmt', pix_fmt, '-c:a', video_cfg['audio_codec'], '-b:a', video_cfg['audio_bitrate'], '-color_range', 'tv', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709'])
-
         if video_cfg.get('codec') in ('h264_nvenc', 'hevc_nvenc'):
             final_cmd_args += ['-rc-lookahead', '20', '-spatial_aq', '1', '-temporal_aq', '1', '-aq-strength', '8', '-rc', 'vbr', '-tune', 'hq', '-multipass', 'fullres', '-bf', '3']
             if video_cfg.get('codec') == 'hevc_nvenc': final_cmd_args += ['-profile:v', 'main10' if bit_depth == 10 else 'main']
-
         ffmpeg_cmd.extend(final_cmd_args); ffmpeg_cmd.extend(['-t', str(length), output_segment_file])
 
-        if verbose_mode:
-            print("    - Assembled FFmpeg command:"); print(f"      {' '.join(ffmpeg_cmd)}")
+        if verbose_mode: print("    - Assembled FFmpeg command:", ' '.join(f'"{c}"' for c in ffmpeg_cmd))
 
         print("  > Step 3/3: Encoding with FFmpeg...")
         encoding_start_time = time.monotonic()
@@ -267,48 +281,36 @@ def assemble_video(
             print(f"\n--- FATAL: FFmpeg failed on segment for '{name}'. ---")
             if not verbose_mode: print("  > FFmpeg error output (stderr):\n", e.stderr)
             sys.exit(1)
-
         routine_elapsed_time += length
 
-    if not segment_files:
-        sys.exit("\nNo segments were created.")
-
+    if not segment_files: sys.exit("\nNo segments were created.")
     if len(segment_files) == 1:
-        print("\n--- 🎞️ Finalizing Single Segment ---")
-        try: shutil.move(segment_files[0], output_path); print(f"  > Renamed '{segment_files[0]}' to '{output_path}'.")
-        except Exception as e:
-            sys.exit(f"  > FATAL: Could not move segment file: {e}")
+        print("\n--- 🎞️ Finalizing Single Segment ---"); shutil.move(segment_files[0], output_path); print(f"  > Renamed '{segment_files[0]}' to '{output_path}'.")
     else:
         print(f"\n--- 🎞️ Concatenating {len(segment_files)} Segments ---")
         concat_file = "concat_list.txt"
         with open(concat_file, 'w', encoding='utf-8') as f:
             for file in segment_files: f.write(f"file '{Path(file).resolve().as_posix()}'\n")
-
         concat_cmd = [ 'ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_file, '-c:v', 'copy', '-c:a', 'aac', '-af', 'aresample=async=1:first_pts=0', output_path ]
         if verbose_mode: print("    - Running concat command:", " ".join(concat_cmd))
-
-        try:
-            subprocess.run(concat_cmd, check=True, capture_output=not verbose_mode, text=True, encoding='utf-8')
-            print(f"  > Concatenation finished successfully.")
+        try: subprocess.run(concat_cmd, check=True, capture_output=not verbose_mode, text=True, encoding='utf-8'); print(f"  > Concatenation finished successfully.")
         except subprocess.CalledProcessError as e:
-            if not verbose_mode: print("  > FFmpeg error output (stderr):", e.stderr)
-            sys.exit(1)
+            if not verbose_mode: print("  > FFmpeg error output (stderr):", e.stderr); sys.exit(1)
         finally:
-             if os.path.exists(concat_file): os.remove(concat_file)
+            if os.path.exists(concat_file): os.remove(concat_file)
 
     print("\n--- 🧹 Cleaning Up Temporary Files ---")
     for file in segment_files:
         if os.path.exists(file): os.remove(file)
-
-    total_duration = time.monotonic() - total_start_time
     print(f"\n✅ Video assembly complete! Final video saved to: {output_path}")
-    print(f"   Total time taken: {total_duration:.2f} seconds.")
+    print(f"   Total time taken: {time.monotonic() - total_start_time:.2f} seconds.")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser( description="Creates a complete exercise video from a source file and a routine plan.", formatter_class=argparse.ArgumentDefaultsHelpFormatter )
     parser.add_argument("routine_path", help="Path to routine YAML file.")
     parser.add_argument("source_video", help="Path to source video file.")
     parser.add_argument("output_video", help="Path for final output video.")
+    parser.add_argument("--bgm", type=str, help="Path to the pre-generated background music file.")
     parser.add_argument("--start", type=float, default=0.0, help="Start time in source video (seconds).")
     parser.add_argument("--end", type=float, help="End time in source video (seconds).")
     parser.add_argument("--segments", type=str, help="Comma-separated list of segments to process (e.g., '1,3,5').")
@@ -318,16 +320,14 @@ if __name__ == '__main__':
     parser.add_argument("--config", type=str, default='config.yaml', help="Path to config file.")
     args = parser.parse_args()
 
-    segments_to_run = None
-    if args.segments:
-        try: segments_to_run = [int(s.strip()) for s in args.segments.split(',')]
-        except ValueError: sys.exit("FATAL: Invalid --segments format. Please provide comma-separated numbers (e.g., '1,3,5').")
+    segments_to_run = [int(s.strip()) for s in args.segments.split(',')] if args.segments else None
 
     assemble_video(
         config_path=args.config,
         routine_path=args.routine_path,
         source_video_path=args.source_video,
         output_path=args.output_video,
+        background_music_path=args.bgm,
         segments_to_process=segments_to_run,
         source_start_offset=args.start,
         source_end_limit=args.end,

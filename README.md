@@ -94,7 +94,7 @@ Your project folder should be set up like this for the scripts to work correctly
 ├── assemble_video.py
 ├── create_hook.py
 ├── create_progress_ring.py
-├── create_background_music.py   <-- New Script
+├── create_background_music.py
 ├── download_music_from_youtube_playlists.py
 ├── requirements.txt
 └── README.md
@@ -121,16 +121,17 @@ pip install -r requirements.txt
 
 Use the included downloader to populate your music library. You can create subfolders for different genres (e.g., `assets/music/high-energy`, `assets/music/calm`).
 ```bash
-python download_music_from_youtube_playlists.py "assets/music" <youtube_url>```
+python download_music_from_youtube_playlists.py "assets/music" <youtube_url>
+```
 
 ### Step 2: Configure Your Style & Audio
 
-Open `config.yaml` and edit the settings. This is where you set everything: fonts, colors, video resolution, your color grading LUT(s), sound effects, and the `background_music` rules. Make sure to define your `music_folder` and add any `folder` rules you want.
+Open `config.yaml` and edit the settings. This is where you set everything: fonts, colors, video resolution, your color grading LUT(s), sound effects, and the `background_music` rules.
 
 ### Step 3: Add Audio Assets
 
 1.  Place your sound effect files (e.g., `swoosh.wav`) in the `assets/sounds/` directory.
-2.  Ensure your background music files are organized in the `assets/music/` directory, matching the folder structure you defined in your config rules.
+2.  Ensure your background music files are organized in the `assets/music/` directory.
 
 ### Step 4: Define Your Routine
 
@@ -146,26 +147,26 @@ python create_progress_ring.py <duration_in_seconds>
 
 ### Step 6: Generate the Background Music Track
 
-Run the new script to create a single audio file for the entire routine. This combines all music and transitions into one track.
+Run the new script to create a single audio file for the entire routine.
 ```bash
 python create_background_music.py routine.yaml background_music.m4a
 ```
 
 ### Step 7: Assemble the Final Video
 
-The main script has several powerful options for processing your video. *(Note: You will later modify this script to accept the `background_music.m4a` file as an input).*
+The main script now accepts the background music file as a new argument, `--bgm`.
 
 **Command Structure:**
 ```bash
-python assemble_video.py <routine_file> <source_video> <output_video> [options]
+python assemble_video.py <routine_file> <source_video> <output_video> --bgm <music_file> [options]
 ```
 
-**Example 1: Full Quality Render**
+**Example 1: Full Quality Render with Music**
 ```bash
-python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "final_video.mp4"
+python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "final_video.mp4" --bgm "background_music.m4a"
 ```
 
-**Example 2: Test a Single Segment**
+**Example 2: Test a Single Segment with Music**
 ```bash
-python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "test_preview.mp4" --segments 3 --test -v
+python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "test_preview.mp4" --bgm "background_music.m4a" --segments 3 --test -v
 ```

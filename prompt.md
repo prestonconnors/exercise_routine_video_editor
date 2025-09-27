@@ -21,14 +21,16 @@ This script generates reusable animated timer assets. Its functionality is stabl
 ### 3. `assemble_video.py`
 
 This is the main orchestration script that builds the final video.
-- **Input:** Must accept positional arguments: `routine.yaml`, `source_video`, `output_video`, and optional flags: `--segments`, `--start`, `--end`, `--test`, `--force-render`, `--verbose`, `--config`.
+- **Input:** Must accept positional arguments: `routine.yaml`, `source_video`, `output_video`, and optional flags: `--bgm`, `--segments`, `--start`, `--end`, `--test`, `--force-render`, `--verbose`, `--config`.
 
 **Functional Requirements:**
 1.  **Dynamic Bit Depth Pipeline:** Must use `ffprobe` to determine the source pixel format and dynamically select correct pixel formats for processing.
 2.  **Smart Codec Handling:** Must automatically switch to `hevc_nvenc` if a `bit_depth` of 10 is requested with an h264 encoder.
-3.  **Simple Audio Mixing:**
-    - Must build a simple audio filter graph that can manage source audio and sound effects simultaneously.
-    - Must correctly use `amix` to combine the main audio track with any triggered sound effects.
+3.  **Complex Audio Mixing with Ducking:**
+    - Must accept an optional path to a pre-generated background music file via the `--bgm` flag.
+    - Must build a multi-input audio filter graph to combine source audio, background music, and triggered sound effects.
+    - Must correctly implement audio ducking using the `sidechaincompress` filter to lower the background music volume when a sound effect is active.
+    - Must use `amix` to combine all final audio streams into a single track.
 4.  **Filter Architecture (GPU-First):** Must perform GPU-native scaling (`scale_cuda`) before downloading the frame for CPU-based filters (`zscale`, `lut3d`, `unsharp`) and overlays (`drawtext`).
 5.  **Robust Final Assembly:** The concatenation step must copy the video stream but re-encode the audio with `aresample` to guarantee A/V synchronization.
 
@@ -67,8 +69,7 @@ This utility pre-generates the entire background audio track for a routine.
 
 Provide:
 - A `requirements.txt` file listing:
-  ```
-  PyYAML
+  ```  PyYAML
   Pillow
   yt-dlp
   ```
