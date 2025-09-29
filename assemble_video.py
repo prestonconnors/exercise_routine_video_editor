@@ -122,8 +122,24 @@ def assemble_video(
         # --- END REUSE LOGIC ---
 
         print(f"\nProcessing Segment {segment_number}/{len(routine)}: '{name}' ({length}s)")
-        print(f"  > Source time: {start_time_in_source:.2f}s -> {end_time_in_source:.2f}s")
 
+        # --- Replacement Logic ---
+        replacement_video_path = exercise.get('replace_video')
+        replacement_audio_path = exercise.get('replace_audio')
+        has_video_replacement = replacement_video_path and os.path.exists(replacement_video_path)
+        has_audio_replacement = replacement_audio_path and os.path.exists(replacement_audio_path)
+
+        final_video_input_path = replacement_video_path if has_video_replacement else source_video_path
+        final_video_input_args = [] if has_video_replacement else ['-ss', str(start_time_in_source), '-to', str(end_time_in_source)]
+        if has_video_replacement:
+            print(f"  > Replacing video with: {os.path.basename(final_video_input_path)}")
+
+        final_audio_input_path = replacement_audio_path if has_audio_replacement else source_video_path
+        final_audio_input_args = [] if has_audio_replacement else ['-ss', str(start_time_in_source), '-to', str(end_time_in_source)]
+        if has_audio_replacement:
+            print(f"  > Replacing audio with: {os.path.basename(final_audio_input_path)}")
+
+        print(f"  > Source time: {start_time_in_source:.2f}s -> {end_time_in_source:.2f}s")
         print(f"  > Step 1/3: Checking for assets...")
         timer_duration = int(length)
         timer_file = os.path.join(paths_cfg.get('asset_output_dir', '.'), paths_cfg.get('timers_subdir', 'timers'), f'timer_{timer_duration}s.mov')
@@ -134,17 +150,32 @@ def assemble_video(
         ffmpeg_cmd = ['ffmpeg', '-y', '-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda',
                       '-threads', '1', '-filter_threads', '0', '-extra_hw_frames', '8']
 
-        # Input 0: Main video
-        ffmpeg_cmd += ['-ss', str(start_time_in_source), '-to', str(end_time_in_source), '-i', source_video_path]
-        
-        current_input_index = 1
+        # --- Dynamic Input Building ---
+        current_input_index = 0
+
+        # Add primary video input.
+        ffmpeg_cmd.extend(final_video_input_args)
+        ffmpeg_cmd.extend(['-i', final_video_input_path])
+        video_stream_spec = f"[{current_input_index}:v]"
+        video_input_stream_index = current_input_index
+        current_input_index += 1
+
+        # Determine if audio needs to be a separate input.
+        if final_audio_input_path == final_video_input_path and final_audio_input_args == final_video_input_args:
+            audio_stream_spec = f"[{video_input_stream_index}:a:0]"
+        else:
+            ffmpeg_cmd.extend(final_audio_input_args)
+            ffmpeg_cmd.extend(['-i', final_audio_input_path])
+            audio_stream_spec = f"[{current_input_index}:a:0]"
+            current_input_index += 1
+
         timer_input_index = sfx_input_index = bgm_input_index = -1
 
-        # Input 1 (optional): Timer overlay
+        # Input (optional): Timer overlay
         if use_timer:
             ffmpeg_cmd.extend(['-i', timer_file]); timer_input_index = current_input_index; current_input_index += 1
         
-        # Input 2 (optional): Background music
+        # Input (optional): Background music
         use_bgm = background_music_path and os.path.exists(background_music_path) and bgm_cfg.get('enabled', False)
         if use_bgm:
             print("    - Found background music.")
@@ -153,7 +184,7 @@ def assemble_video(
         elif background_music_path:
             print("    - WARNING: Background music file specified but 'enabled' is false in config or file not found. Skipping BGM.")
 
-        # Input 3 (optional): Sound Effect
+        # Input (optional): Sound Effect
         sfx_rule_to_apply, sfx_file = None, None
         if sfx_cfg.get('rules') and sfx_cfg.get('effects'):
             for rule in sfx_cfg['rules']:
@@ -174,7 +205,7 @@ def assemble_video(
 
         print("  > Step 2/3: Building FFmpeg command...")
         target_res = video_cfg['resolution']; W, H = target_res.split('x'); target_res_colon = f"{W}:{H}"
-        in_pix = probe_pix_fmt(source_video_path)
+        in_pix = probe_pix_fmt(final_video_input_path)
         bit_depth = int(video_cfg.get('bit_depth', 8))
         pix_fmt = 'p010le' if bit_depth == 10 else 'yuv420p'
         cpu_download_fmt = 'p010le' if '10' in in_pix else 'nv12'
@@ -185,7 +216,7 @@ def assemble_video(
 
         filter_complex_chains = []
 
-        # --- VIDEO GRAPH LOGIC (unchanged) ---
+        # --- VIDEO GRAPH LOGIC ---
         cpu_filters = [f"[gpu_scaled]hwdownload,format={cpu_download_fmt},setpts=PTS-STARTPTS"]
         if video_cfg.get('framing_method') == 'crop': cpu_filters.append(f"crop={W}:{H}:floor((iw-{W})/4)*2:floor((ih-{H})/4)*2")
         apply_lut, lut_files = source_cfg.get('apply_lut', False), source_cfg.get('lut_files', [])
@@ -199,18 +230,18 @@ def assemble_video(
             cpu_filters.append(f"zscale=p=709:t=709:m=709:r=limited,format={pix_fmt}")
         if sharpen_cfg.get('enabled', False): cpu_filters.append(f"unsharp=lx=3:ly=3:la={sharpen_cfg.get('luma_amount', 0.5)}")
         last_stream = "[cpu_processed]"
-        filter_complex_chains.extend([f"[0:v]scale_cuda={target_res_colon}:force_original_aspect_ratio=increase[gpu_scaled]", ",".join(cpu_filters) + last_stream])
+        filter_complex_chains.extend([f"{video_stream_spec}scale_cuda={target_res_colon}:force_original_aspect_ratio=increase[gpu_scaled]", ",".join(cpu_filters) + last_stream])
         if use_timer:
             pos = ring_cfg.get('position', {}); timer_pix_fmt = 'yuva444p10le'; filter_complex_chains.extend([f"[{timer_input_index}:v]scale={ring_cfg['size']}:-1,format={timer_pix_fmt}[timer]", f"{last_stream}[timer]overlay=x='{pos.get('x', '(W-w)/2')}':y='{pos.get('y', '50')}'[with_timer]"]); last_stream = "[with_timer]"
         clean_text = prepare_text_for_ffmpeg(name, title_cfg.get('wrap_at_char', 25)); font_path = title_cfg.get('font_file', '').replace('\\', '/').replace(':', '\\:')
         video_chain_suffix = f"drawtext=fontfile='{font_path}':text='{clean_text}':fontsize={title_cfg.get('font_size',80)}:fontcolor={title_cfg.get('font_color','white')}:box=1:boxcolor={title_cfg.get('box_color','black@0.7')}:boxborderw={title_cfg.get('box_border_width',15)}:x='{title_cfg.get('position_x','(w-text_w)/2')}':y='{title_cfg.get('position_y','h*0.8')}',setsar=1[final_v]"
         filter_complex_chains.append(f"{last_stream}{video_chain_suffix}")
 
-        # --- REBUILT AUDIO GRAPH LOGIC ---
+        # --- AUDIO GRAPH LOGIC ---
         audio_streams_to_mix, audio_filter_chains = [], []
         
         # 1. Prepare main audio stream
-        audio_filter_chains.append("[0:a:0]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[main_a]")
+        audio_filter_chains.append(f"{audio_stream_spec}aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[main_a]")
         audio_streams_to_mix.append("[main_a]")
         
         # 2. Prepare BGM and SFX streams
@@ -235,9 +266,6 @@ def assemble_video(
             duck_vol_ratio = bgm_cfg.get('ducking_volume', 0.2)
             audio_filter_chains.append(f"{sfx_stream_for_mixing}asplit[sfx_mix][sfx_sc]")
             sfx_stream_for_mixing = "[sfx_mix]" # Update stream for final mix
-            
-            # ** THE FIX IS HERE **
-            # Removed the extra brackets from [{bgm_stream_for_mixing}]
             audio_filter_chains.append(f"{bgm_stream_for_mixing}[sfx_sc]sidechaincompress=threshold=0.01:ratio=5:level_sc={duck_vol_ratio}[bgm_ducked]")
             bgm_stream_for_mixing = "[bgm_ducked]" # Update stream for final mix
 
@@ -258,7 +286,6 @@ def assemble_video(
             audio_map_target = "[final_a]"
             
         filter_complex_chains.extend(audio_filter_chains)
-        # --- END AUDIO LOGIC ---
         
         filter_complex = ";".join(filter_complex_chains)
 

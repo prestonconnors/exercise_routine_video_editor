@@ -32,7 +32,8 @@ This is the main orchestration script that builds the final video.
     - Must correctly implement audio ducking using the `sidechaincompress` filter to lower the background music volume when a sound effect is active.
     - Must use `amix` to combine all final audio streams into a single track.
 4.  **Filter Architecture (GPU-First):** Must perform GPU-native scaling (`scale_cuda`) before downloading the frame for CPU-based filters (`zscale`, `lut3d`, `unsharp`) and overlays (`drawtext`).
-5.  **Robust Final Assembly:** The concatenation step must copy the video stream but re-encode the audio with `aresample` to guarantee A/V synchronization.
+5.  **Segment-Level Media Overrides:** Must support `replace_video` and `replace_audio` keys within the `routine.yaml` file for any segment, allowing users to substitute specific video or audio clips (e.g., for custom intros/outros) while maintaining all other processing like overlays and effects.
+6.  **Robust Final Assembly:** The concatenation step must copy the video stream but re-encode the audio with `aresample` to guarantee A/V synchronization.
 
 ### 4. `create_hook.py` (New Utility)
 
@@ -69,9 +70,8 @@ This utility pre-generates the entire background audio track for a routine.
 
 Provide:
 - A `requirements.txt` file listing:
-  ```  PyYAML
-  Pillow
-  yt-dlp
-  ```
+PyYAML
+Pillow
+yt-dlp
 - A comprehensive `README.md` file covering the video generator and all utility scripts.
 - The `prompt.md` file itself for project regeneration.

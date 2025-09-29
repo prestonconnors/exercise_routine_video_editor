@@ -9,6 +9,7 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
 - **Centralized Styling:** All visual elements (colors, fonts, sizes, positions) are controlled in a single `config.yaml` file.
 - **Efficient Re-rendering:** The pipeline automatically detects and reuses previously rendered video segments, only encoding new or changed portions.
 - **Rule-Based Sound Effects:** Define a library of sound effects and create rules to automatically play sounds based on keywords in the exercise name.
+- **Segment Media Overrides:** Easily replace the video and/or audio for any specific segment (like an intro or outro) directly within your `routine.yaml`.
 - **Dynamic Background Music:**
   - Creates a continuous "radio mix" style track that plays across segments.
   - A song continues playing until it ends naturally or a rule forces an interruption.
@@ -136,6 +137,21 @@ Open `config.yaml` and edit the settings. This is where you set everything: font
 ### Step 4: Define Your Routine
 
 Open or create a `routine.yaml` file. List each exercise or rest period with its `name` and `length` in seconds.
+
+You can also override the video or audio for a specific segment using the `replace_video` and `replace_audio` keys. This is perfect for adding custom, pre-edited intros or outros.
+
+**Example `routine.yaml` with Overrides:**
+```yaml
+- name: "Intro"
+  length: 10
+  # This segment's video is replaced by your premade intro.
+  # The audio still comes from the main source video, as requested.
+  replace_video: 'C:/assets/my_premade_intro.mov'
+
+- name: "Burpees"
+  length: 45
+  # This is a normal segment using the main source video.
+```
 
 ### Step 5: Generate Timer Assets
 
