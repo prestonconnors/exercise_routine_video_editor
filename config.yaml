@@ -100,7 +100,7 @@ background_music:
       mode: 'loop'         # 'loop' for the segment, 'continue' across segments
     - name: 'Calm Music for Rest'
       triggers: ['Cool Down', 'Outro']
-      folder: 'assets/music/calm'
+      folder: 'assets/music/Calm'
       mode: 'continue'
     - name: 'Intro Music'
       triggers: ['Intro']
