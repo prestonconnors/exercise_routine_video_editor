@@ -5,6 +5,34 @@ import sys
 import operator
 import tempfile
 import shlex
+import json
+
+def get_video_pix_fmt(input_file):
+    """
+    Uses ffprobe to get the pixel format of the first video stream.
+    """
+    print("[INFO] Detecting video pixel format...")
+    command = [
+        "ffprobe",
+        "-v", "quiet",
+        "-print_format", "json",
+        "-show_streams",
+        input_file
+    ]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, check=True)
+        data = json.loads(result.stdout)
+        video_stream = next((stream for stream in data['streams'] if stream['codec_type'] == 'video'), None)
+        if video_stream and 'pix_fmt' in video_stream:
+            pix_fmt = video_stream['pix_fmt']
+            print(f"[SUCCESS] Detected pixel format: {pix_fmt}")
+            return pix_fmt
+        else:
+            print("[WARNING] Could not determine pixel format. Defaulting to 'nv12'.")
+            return 'yuv420p' # A safe default
+    except (subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"[WARNING] ffprobe failed to run or parse output: {e}. Defaulting to 'nv12'.")
+        return 'yuv420p' # A safe default
 
 def check_ffmpeg():
     """Checks if FFmpeg is installed and in the system's PATH."""
@@ -27,6 +55,11 @@ def analyze_video(input_file, threshold, use_gpu=False, cl_device="0.0", start_t
 
     if use_gpu:
         print(f"Using GPU acceleration for analysis (OpenCL on device {cl_device})")
+
+        source_pix_fmt = get_video_pix_fmt(input_file)
+        hwdownload_format = source_pix_fmt
+        print(f"[INFO] Using format '{hwdownload_format}' for GPU->CPU transfer.")
+
     else:
         print(f"Using CPU for analysis")
 
@@ -38,7 +71,10 @@ def analyze_video(input_file, threshold, use_gpu=False, cl_device="0.0", start_t
 
     if use_gpu:
         command.extend(["-init_hw_device", f"opencl=ocl:{cl_device}"])
-    
+
+    if start_time > 0.0 and end_time is not None:
+        command.extend(["-copyts"])
+
     command.extend(["-i", input_file])
 
     if end_time is not None:
@@ -48,24 +84,35 @@ def analyze_video(input_file, threshold, use_gpu=False, cl_device="0.0", start_t
         command.extend(["-to", str(end_time)])
 
     if use_gpu:
-        filter_chain = f"hwupload_cuda,scale_cuda=320:240,hwdownload,fps=15,format=p010le,select='gt(scene,{threshold})',metadata=print:file={log_filename}"
-        #filter_chain = f"hwupload,hwdownload,format=p010le,select='gt(scene,{threshold})',metadata=print:file={log_filename}"
+        # *** ROBUST FIX APPLIED HERE ***
+        # Since 'scale_opencl' is not in your build, we hwupload, hwdownload,
+        # and then use the standard 'scale' filter on the CPU.
+        # This is a compatible and robust way to use the OpenCL context.
+        filter_chain = (
+            f"hwupload,"
+            f"hwdownload,format={hwdownload_format},"
+            f"scale=w=320:h=240,"
+            f"fps=15,select='gt(scene,{threshold})',metadata=print:file={log_filename}"
+        )
         command.extend(["-filter_hw_device", "ocl", "-vf", filter_chain])
     else:
-        filter_chain = f"select='gt(scene,{threshold})',metadata=print:file={log_filename}"
+        # Standard CPU-only filter chain
+        filter_chain = f"scale=w=320:h=240,fps=15,select='gt(scene,{threshold})',metadata=print:file={log_filename}"
         command.extend(["-vf", filter_chain])
+
 
     command.extend(["-f", "null", "-"])
     try:
         print("\n[INFO] Starting FFmpeg scene analysis. See live progress below:")
         print("----------------------------------------------------------------------")
-        subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(command, check=True, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL)
         print("\n----------------------------------------------------------------------")
         print("[SUCCESS] FFmpeg analysis complete.")
         return True
     except subprocess.CalledProcessError as e:
         error_message = e.stderr.decode() if hasattr(e, 'stderr') and e.stderr else "Unknown FFmpeg error."
-        print(f"\n[ERROR] FFmpeg analysis failed:\n{error_message}")
+        full_command_str = ' '.join(shlex.quote(c) for c in command)
+        print(f"\n[ERROR] FFmpeg analysis failed.\nFull Command: {full_command_str}\nError:\n{error_message}")
         return False
     except KeyboardInterrupt:
         print("\n\n[INFO] Process cancelled by user.")
@@ -194,8 +241,10 @@ def extract_and_fade_combine(input_file, start_times, clip_duration, output_file
         filter_complex = ""
         fade_end_point = clip_duration - fade_duration
         for i in range(len(temp_files_for_concat)):
-            if i < len(temp_files_for_concat) - 1: filter_complex += f"[{i}:v]fade=type=out:start_time={fade_end_point}:duration={fade_duration}:color=white[v{i}_fadeout];"
-            else: filter_complex += f"[{i}:v]null[v{i}_fadeout];"
+            # MODIFICATION: Apply fade out to ALL clips, including the last one.
+            filter_complex += f"[{i}:v]fade=type=out:start_time={fade_end_point}:duration={fade_duration}:color=white[v{i}_fadeout];"
+            
+            # Apply fade in to all clips except the very first one.
             if i > 0: filter_complex += f"[v{i}_fadeout]fade=type=in:start_time=0:duration={fade_duration}:color=white[v{i}_final];"
             else: filter_complex += f"[v{i}_fadeout]null[v{i}_final];"
 
@@ -239,7 +288,7 @@ def main():
     parser.add_argument("--gpu", action="store_true", help="Use GPU (OpenCL) for the analysis phase. Does not affect encoding.")
     parser.add_argument("--cl_device", type=str, default="0.0", help="The OpenCL device to use for analysis. (default: 0.0)")
     parser.add_argument('--transition', choices=['white'], help="Adds a 'dip to white' transition. This requires re-encoding the video.")
-    parser.add_argument('--encoder', type=str, default='libx264', help="Video encoder to use when transitions are enabled. (default: 'libx264'). Hardware options: 'h264_nvenc', 'hevc_nvenc' (NVIDIA), 'h264_videotoolbox' (macOS), 'h264_amf' (AMD).")
+    parser.add_argument('--encoder', type=str, default='libx24', help="Video encoder to use when transitions are enabled. (default: 'libx264'). Hardware options: 'h264_nvenc', 'hevc_nvenc' (NVIDIA), 'h264_videotoolbox' (macOS), 'h264_amf' (AMD).")
     parser.add_argument('--cuda_device', type=str, default='0', help="CUDA device index for NVENC encoding (default: '0').")
 
     args = parser.parse_args()
@@ -254,7 +303,7 @@ def main():
         print(f"\n[INFO] Found existing '{log_file_path}'. Skipping analysis phase.")
         analysis_completed = True
     else:
-        analysis_completed = analyze_video(args.input, args.threshold, args.gpu, args.cl_device, start_time=args.start, end_time=args.end)
+        analysis_completed = analyze_video(args.input, args.threshold, args.gpu, args.cuda_device, start_time=args.start, end_time=args.end)
 
     if analysis_completed:
         start_times = find_most_active_clips(log_file_path, args.clip_duration, args.num_clips)
