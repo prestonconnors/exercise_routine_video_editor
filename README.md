@@ -50,6 +50,7 @@ python create_background_music.py "routine.yaml" "background_music.m4a"
 The `create_hook.py` script automatically finds the most motion-intensive scenes in your long video and combines them into a short, high-action preview video. This is perfect for creating social media "hooks."
 
 - **Intelligent Scene Detection:** Analyzes the video to find segments with the most motion. Supports optional GPU (OpenCL) acceleration for faster analysis.
+- **Targeted Analysis:** Use the `--center_focus` flag to analyze only the center of the frame, ignoring background movement and dramatically improving accuracy for subject-focused videos.
 - **Blazing-Fast & Lossless:** Uses FFmpeg stream copy to extract clips without re-encoding, preserving quality and making the process extremely fast.
 - **Highly Customizable:** Control the number of clips, the length of each clip, and the motion detection sensitivity.
 
@@ -59,8 +60,8 @@ python create_hook.py <source_video> <num_clips> <clip_duration_sec> [options]
 ```
 **Example:**
 ```bash
-# Find the 5 most active 1-second clips from a workout video
-python create_hook.py "final_video.mp4" 5 1 -o "hook.mp4" --gpu --threshold 0.02
+# Find the 5 most active 1-second clips, focusing on the center 60% of the video.
+python create_hook.py "final_video.mp4" 5 1 -o "hook.mp4" --gpu --scoring peak --center_focus 0.6
 ```
 
 ### Quality-First Music Downloader
