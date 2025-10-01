@@ -67,6 +67,11 @@ def analyze_video(input_file, threshold, use_gpu=False, cl_device="0.0", start_t
         print(f"Using GPU acceleration for analysis (OpenCL on device {cl_device})")
         source_pix_fmt = get_video_pix_fmt(input_file)
         hwdownload_format = source_pix_fmt
+
+        if hwdownload_format == 'yuv420p10le':
+            hwdownload_format = 'p010le'
+            print(f"[INFO] Adjusted pixel format to '{hwdownload_format}' for hwdownload compatibility.")
+
         print(f"[INFO] Using format '{hwdownload_format}' for GPU->CPU transfer.")
     else:
         print(f"Using CPU for analysis")
