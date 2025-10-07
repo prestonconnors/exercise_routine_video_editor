@@ -110,14 +110,17 @@ def analyze_video(input_file, threshold, use_gpu=False, cl_device="0.0", start_t
     try:
         print("\n[INFO] Starting FFmpeg scene analysis. See live progress below:")
         print("----------------------------------------------------------------------")
-        subprocess.run(command, check=True, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL)
+        # The 'stderr=subprocess.PIPE' argument has been removed to allow live output.
+        subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
         print("\n----------------------------------------------------------------------")
         print("[SUCCESS] FFmpeg analysis complete.")
         return True
     except subprocess.CalledProcessError as e:
-        error_message = e.stderr.decode() if hasattr(e, 'stderr') and e.stderr else "Unknown FFmpeg error."
+        # Since stderr was not captured, it has already been printed to the screen.
+        # We now print a simpler error message.
         full_command_str = ' '.join(shlex.quote(c) for c in command)
-        print(f"\n[ERROR] FFmpeg analysis failed.\nFull Command: {full_command_str}\nError:\n{error_message}")
+        print(f"\n[ERROR] FFmpeg analysis failed. See the error message above.")
+        print(f"Full Command: {full_command_str}")
         return False
     except KeyboardInterrupt:
         print("\n\n[INFO] Process cancelled by user.")
