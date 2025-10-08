@@ -8,6 +8,7 @@ import time
 import random
 from pathlib import Path
 import shutil
+import json
 
 # --- Helper Functions ---
 def sanitize_text_for_ffmpeg(text: str) -> str:
@@ -48,6 +49,103 @@ def is_video_file_valid(path: str) -> bool:
     except FileNotFoundError:
         print("WARNING: ffprobe not found in PATH. Cannot validate segments; will re-render if necessary.")
         return False
+
+def optimize_final_audio(config_path: str, video_file_path: str, verbose: bool = False):
+    """
+    Performs a two-pass loudness normalization on the final video file.
+    Crucially, this uses `-c:v copy` on the second pass to avoid re-encoding video.
+    """
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            cfg = yaml.safe_load(f)
+    except FileNotFoundError:
+        print(f"WARNING: Config file not found at '{config_path}', skipping final audio optimization.")
+        return
+
+    opt_cfg = cfg.get('audio_optimization', {})
+    norm_cfg = opt_cfg.get('loudness_normalization', {})
+
+    if not opt_cfg.get('enabled') or not norm_cfg.get('enabled'):
+        print("\n--- Final audio optimization disabled in config. Skipping. ---")
+        return
+
+    print("\n--- 🔊 Performing Final Audio Optimization ---")
+    
+    # --- PASS 1: ANALYSIS ---
+    print("  > Step 1/2: Analyzing audio loudness...")
+    target_i = norm_cfg.get('target_i', -16)
+    target_lra = norm_cfg.get('target_lra', 11)
+    target_tp = norm_cfg.get('target_tp', -1.5)
+
+    pass1_cmd = [
+        'ffmpeg', '-i', video_file_path, '-af',
+        f'loudnorm=I={target_i}:LRA={target_lra}:tp={target_tp}:print_format=json',
+        '-f', 'null', '-'
+    ]
+    
+    try:
+        # We need to capture stderr because ffmpeg writes loudnorm stats there
+        result = subprocess.run(pass1_cmd, check=True, capture_output=True, text=True, encoding='utf-8')
+    except subprocess.CalledProcessError as e:
+        print("\n--- FATAL: FFmpeg failed during audio analysis pass. ---")
+        print("  > FFmpeg error output (stderr):\n", e.stderr)
+        sys.exit(1)
+        
+    # Extract JSON from the messy stderr output
+    json_str = ""
+    for line in result.stderr.splitlines():
+        if line.strip().startswith('{'):
+            json_str = line
+            # In case the json is multi-line
+            json_str = result.stderr[result.stderr.find('{'):result.stderr.rfind('}')+1]
+            break
+            
+    if not json_str:
+        print("\n--- FATAL: Could not find loudnorm JSON data in FFmpeg output. ---")
+        print("  > FFmpeg output:\n", result.stderr)
+        sys.exit(1)
+        
+    try:
+        loudnorm_stats = json.loads(json_str)
+        if verbose: print("    - Analysis complete. Stats:", loudnorm_stats)
+    except json.JSONDecodeError:
+        print("\n--- FATAL: Failed to parse loudnorm JSON data. ---")
+        print("  > Raw string for parsing:\n", json_str)
+        sys.exit(1)
+
+    # --- PASS 2: APPLYING NORMALIZATION ---
+    print("  > Step 2/2: Applying normalization (video stream will be copied)...")
+    
+    # Prepare a temporary output path to avoid read/write conflicts
+    original_path = Path(video_file_path)
+    temp_output_path = original_path.with_name(f"{original_path.stem}_temp_normalized{original_path.suffix}")
+
+    pass2_cmd = [
+        'ffmpeg', '-y', '-i', video_file_path, '-af',
+        (f"loudnorm=I={target_i}:LRA={target_lra}:tp={target_tp}:"
+         f"measured_i={loudnorm_stats['input_i']}:"
+         f"measured_lra={loudnorm_stats['input_lra']}:"
+         f"measured_tp={loudnorm_stats['input_tp']}:"
+         f"measured_thresh={loudnorm_stats['input_thresh']}:"
+         f"offset={loudnorm_stats['target_offset']}"),
+        '-c:v', 'copy',  # <-- This is the magic part!
+        '-c:a', cfg.get('video_output', {}).get('audio_codec', 'aac'),
+        '-b:a', cfg.get('video_output', {}).get('audio_bitrate', '192k'),
+        str(temp_output_path)
+    ]
+    
+    try:
+        subprocess.run(pass2_cmd, check=True, capture_output=not verbose, text=True, encoding='utf-8')
+        print(f"    - Normalization successful.")
+    except subprocess.CalledProcessError as e:
+        print("\n--- FATAL: FFmpeg failed during audio normalization pass. ---")
+        if not verbose: print("  > FFmpeg error output (stderr):\n", e.stderr)
+        sys.exit(1)
+        
+    # Replace original with the new normalized file
+    os.remove(video_file_path)
+    shutil.move(str(temp_output_path), video_file_path)
+    print("  > Final audio optimized successfully.")
 
 # --- Main Logic ---
 def assemble_video(
@@ -239,11 +337,35 @@ def assemble_video(
 
         # --- AUDIO GRAPH LOGIC ---
         audio_streams_to_mix, audio_filter_chains = [], []
-        
+
         # 1. Prepare main audio stream
-        audio_filter_chains.append(f"{audio_stream_spec}aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[main_a]")
-        audio_streams_to_mix.append("[main_a]")
-        
+
+        # --- REVISED & CORRECTED LOGIC ---
+        audio_opt_cfg = cfg.get('audio_optimization', {})
+        vocal_enhance_cfg = audio_opt_cfg.get('vocal_enhancement', {})
+
+        # Start building a list of filters for the main audio stream
+        main_audio_chain_parts = [f"{audio_stream_spec}aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS"]
+
+        if audio_opt_cfg.get('enabled') and vocal_enhance_cfg.get('enabled'):
+            print("    - Applying vocal enhancement (EQ/Compression)...")
+            hp_hz = vocal_enhance_cfg.get('highpass_hz', 80)
+            pb_hz = vocal_enhance_cfg.get('presence_boost_hz', 2500)
+            pb_db = vocal_enhance_cfg.get('presence_boost_db', 2)
+            comp_params = vocal_enhance_cfg.get('compression_params', '')
+
+            main_audio_chain_parts.append(f"highpass=f={hp_hz}")
+            main_audio_chain_parts.append(f"equalizer=f={pb_hz}:width_type=q:width=2:g={pb_db}")
+            if comp_params:
+                main_audio_chain_parts.append(comp_params)
+
+        # Now, join all parts of the main audio chain with commas and add the final output pad name
+        full_main_audio_filter = ",".join(main_audio_chain_parts) + "[main_a]"
+
+        # Add this single, complete chain to the list of filtergraph chains
+        audio_filter_chains.append(full_main_audio_filter)
+        audio_streams_to_mix.append("[main_a]") # This is now ready for mixing
+                
         # 2. Prepare BGM and SFX streams
         bgm_stream_for_mixing, sfx_stream_for_mixing = "", ""
         if use_bgm:
@@ -361,4 +483,10 @@ if __name__ == '__main__':
         test_mode=args.test,
         verbose_mode=args.verbose,
         force_render=args.force_render
+    )
+
+    optimize_final_audio(
+        config_path=args.config,
+        video_file_path=args.output_video,
+        verbose=args.verbose
     )

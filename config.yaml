@@ -126,3 +126,26 @@ test_mode_settings:
   preset: 'p1'
   quality: 28
   audio_bitrate: '96k'
+
+# -- Section 10: Final Audio Optimization --
+audio_optimization:
+  enabled: true
+
+  # Stage 1: Applied during segment creation for vocal clarity
+  vocal_enhancement:
+    enabled: true
+    # Cuts low-end mic rumble below this frequency (in Hz)
+    highpass_hz: 80
+    # Boosts vocal presence at this frequency (in Hz)
+    presence_boost_hz: 2500
+    # How much to boost the presence (in dB)
+    presence_boost_db: 2
+    # FFmpeg compand filter string for vocal consistency
+    compression_params: "compand=attacks=0:points=-80/-900|-45/-15|-27/-9|-5/-5|20/20"
+
+  # Stage 2: Applied to the final concatenated video for platform compliance
+  loudness_normalization:
+    enabled: true
+    target_i: -16      # Target Integrated Loudness (LUFS)
+    target_lra: 11     # Target Loudness Range (LU)
+    target_tp: -1.5    # Target True Peak (dBFS)

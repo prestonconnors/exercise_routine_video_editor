@@ -10,6 +10,7 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
 - **Efficient Re-rendering:** The pipeline automatically detects and reuses previously rendered video segments, only encoding new or changed portions.
 - **Rule-Based Sound Effects:** Define a library of sound effects and create rules to automatically play sounds based on keywords in the exercise name.
 - **Segment Media Overrides:** Easily replace the video and/or audio for any specific segment (like an intro or outro) directly within your `routine.yaml`.
+- **(New) Final Audio Mastering:** An automated, two-stage process produces professional, platform-ready audio. First, it applies vocal enhancement (EQ for clarity, compression for consistency) during segment rendering. Then, after the video is assembled, it performs a final EBU R128 loudness normalization pass to meet YouTube/Instagram standards, all without re-encoding the video.
 - **Dynamic Background Music:**
   - Creates a continuous "radio mix" style track that plays across segments.
   - A song continues playing until it ends naturally or a rule forces an interruption.
@@ -58,8 +59,7 @@ The `create_hook.py` script automatically finds the most motion-intensive scenes
 ```bash
 python create_hook.py <source_video> <num_clips> <clip_duration_sec> [options]
 ```
-**Example:**
-```bash
+**Example:**```bash
 # Find the 5 most active 1-second clips, focusing on the center 60% of the video.
 python create_hook.py "final_video.mp4" 5 1 -o "hook.mp4" --gpu --scoring peak --center_focus 0.6
 ```
@@ -128,7 +128,7 @@ python download_music_from_youtube_playlists.py "assets/music" <youtube_url>
 
 ### Step 2: Configure Your Style & Audio
 
-Open `config.yaml` and edit the settings. This is where you set everything: fonts, colors, video resolution, your color grading LUT(s), sound effects, and the `background_music` rules.
+Open `config.yaml` and edit the settings. This is where you set everything: fonts, colors, video resolution, your color grading LUT(s), sound effects, `background_music` rules, and the new `audio_optimization` settings.
 
 ### Step 3: Add Audio Assets
 
@@ -171,7 +171,7 @@ python create_background_music.py routine.yaml background_music.m4a
 
 ### Step 7: Assemble the Final Video
 
-The main script now accepts the background music file as a new argument, `--bgm`.
+The main script now accepts the background music file as a new argument, `--bgm`. After the video segments are concatenated, the script will automatically run the final audio optimization pass if it's enabled in your `config.yaml`.
 
 **Command Structure:**
 ```bash

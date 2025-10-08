@@ -13,6 +13,7 @@ The configuration file must support a highly detailed structure, including:
 - **`sound_effects`:** A section to control audio overlays, with a library of effects and rules to trigger them.
 - **`video_output`:** Default resolution, encoder, audio settings, `bit_depth`, and advanced NVENC tuning parameters.
 - **`test_mode_settings`:** A section that overrides keys from `video_output`.
+- **`audio_optimization`:** (New) A dedicated section for final audio mastering, including vocal enhancement (EQ, compression) and EBU R128 loudness normalization targets.
 
 ### 2. `create_progress_ring.py`
 
@@ -34,6 +35,7 @@ This is the main orchestration script that builds the final video.
 4.  **Filter Architecture (GPU-First):** Must perform GPU-native scaling (`scale_cuda`) before downloading the frame for CPU-based filters (`zscale`, `lut3d`, `unsharp`) and overlays (`drawtext`).
 5.  **Segment-Level Media Overrides:** Must support `replace_video` and `replace_audio` keys within the `routine.yaml` file for any segment, allowing users to substitute specific video or audio clips (e.g., for custom intros/outros) while maintaining all other processing like overlays and effects.
 6.  **Robust Final Assembly:** The concatenation step must copy the video stream but re-encode the audio with `aresample` to guarantee A/V synchronization.
+7.  **(New) Two-Stage Audio Mastering:** Must implement a final, two-stage audio optimization process controlled via the config file. This includes (a) vocal enhancement filters (EQ, compression) applied during segment rendering and (b) a two-pass EBU R128 loudness normalization (`loudnorm`) applied to the final concatenated video *without* re-encoding the video stream.
 
 ### 4. `create_hook.py` (New Utility)
 
