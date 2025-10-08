@@ -59,7 +59,8 @@ The `create_hook.py` script automatically finds the most motion-intensive scenes
 ```bash
 python create_hook.py <source_video> <num_clips> <clip_duration_sec> [options]
 ```
-**Example:**```bash
+**Example:**
+```bash
 # Find the 5 most active 1-second clips, focusing on the center 60% of the video.
 python create_hook.py "final_video.mp4" 5 1 -o "hook.mp4" --gpu --scoring peak --center_focus 0.6
 ```
@@ -186,4 +187,23 @@ python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "final_video.mp
 **Example 2: Test a Single Segment with Music**
 ```bash
 python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "test_preview.mp4" --bgm "background_music.m4a" --segments 3 --test -v
+```
+
+## Automated Workflow Script (Recommended)
+
+To simplify the video creation process, you can use the provided `run_workflow.py` script. This script automatically performs Steps 5, 6, and 7 in a single command, making it the most efficient way to generate a complete video. It reads your routine file to determine which timers to create before generating the music and assembling the final video.
+
+- **Purpose:** Automates timer generation, background music creation, and final video assembly.
+- **Features:**
+    - Intelligently parses your `routine.yaml` to create only the required timer assets.
+    - Provides real-time progress output during the video assembly stage.
+    - Passes through key options like `--start` to trim the source video.
+
+**Usage:**
+```bash
+# General structure
+python run_workflow.py <routine_yaml_path> <source_video_path> [options]
+
+# Example: Create the Monday video, trimming the first 30 seconds of the source footage
+python run_workflow.py "routine.yaml" "D:/Video/raw_workout.MOV" --start 30
 ```

@@ -77,3 +77,17 @@ Pillow
 yt-dlp
 - A comprehensive `README.md` file covering the video generator and all utility scripts.
 - The `prompt.md` file itself for project regeneration.
+
+### 8. `run_workflow.py` (Orchestrator)
+
+This is a top-level helper script designed to simplify the entire video creation process by chaining the necessary steps together.
+- **Purpose:** To act as a single command-line interface for the most common end-to-end workflow (generating assets and assembling the video).
+- **Process:**
+  1. Parse the specified routine YAML file to identify all unique segment lengths.
+  2. Execute `create_progress_ring.py` for each unique length to ensure all timer assets exist.
+  3. Execute `create_background_music.py` to generate the complete audio track.
+  4. Execute `assemble_video.py` with the correct inputs to build the final video.
+- **Input:** Must accept positional arguments `routine_file` and `source_video`, along with an optional `--start` flag that is passed directly to `assemble_video.py`.
+- **Subprocess Handling:**
+  - Must explicitly use the Python executable from the active virtual environment (`sys.executable`) when calling other scripts to prevent `ModuleNotFoundError`.
+  - Must ensure that output from child scripts (especially `assemble_video.py`) is streamed to the console in real-time and unbuffered.
