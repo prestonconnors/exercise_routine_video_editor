@@ -1,3 +1,13 @@
+Yes, absolutely. The `prompt.md` is a critical document for ensuring the project can be regenerated accurately. Based on the significant feature enhancements we made to `create_hook.py`, its description in the prompt is now outdated.
+
+I have updated the `create_hook.py` section to reflect its final, more powerful capabilities, including routine-aware analysis, unique exercise prioritization, and the max duration/speed-up feature. The rest of the document is accurate and remains unchanged.
+
+Here is the updated `prompt.md` file:
+
+---
+
+# prompt.md
+
 I need you to act as an expert Python developer and FFmpeg specialist. Your task is to re-create a complete, automated pipeline for generating styled exercise videos based on a pre-existing, functional set of Python scripts and a YAML configuration file.
 
 You must adhere to the final, stable architecture provided.
@@ -41,11 +51,13 @@ This is the main orchestration script that builds the final video.
 
 This utility script automatically creates a short "hook" or "preview" video from a longer source.
 - **Purpose:** Identifies and combines the most motion-intensive clips to generate engaging short-form content.
-- **Process:**
-    1.  **Analyze:** Uses FFmpeg with the `select='gt(scene,threshold)'` filter to score motion. Supports optional OpenCL GPU acceleration.
-    2.  **Parse:** Aggregates scene scores over user-defined time windows to find the periods with the most action.
-    3.  **Extract & Combine:** Uses FFmpeg's fast stream copy (`-c copy`) by default to perform lossless extraction of the top clips, then concatenates them. Optionally supports re-encoding to add transitions.
-- **Input:** Must accept positional arguments `input`, `num_clips`, `clip_duration`, and optional flags like `--output`, `--threshold`, and `--gpu`.
+- **Features:**
+    - **Routine-Aware Analysis:** Must support a `--routine` flag to parse a `routine.yaml`. When used, it intelligently analyzes only "action" segments (ignoring rests, intros, etc.) for more relevant clip selection.
+    - **Variety Prioritization:** When using a routine, the script must prioritize selecting the most active clips from *unique* exercises first before adding duplicates.
+    - **Time-Constrained Speed-Up:** Must support a `--max_duration` flag. If the combined clip duration exceeds this value, the final video must be re-encoded and sped up to fit the target time.
+    - **Analysis:** Uses FFmpeg's `select='gt(scene,threshold)'` filter for motion scoring and supports optional OpenCL GPU acceleration.
+    - **Extraction:** Uses fast, lossless stream copy (`-c copy`) by default. Re-encoding is only triggered if speed changes or transitions are required.
+- **Input:** Must accept positional arguments `input`, `num_clips`, `clip_duration`, and optional flags like `--output`, `--threshold`, `--gpu`, `--routine`, and `--max_duration`.
 
 ### 5. `download_music_from_youtube_playlists.py`
 

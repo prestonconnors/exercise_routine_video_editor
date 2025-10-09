@@ -1,3 +1,16 @@
+Of course! Based on the new features added to the `create_hook.py` script, I have updated the corresponding section in your `README.md`.
+
+The key changes include:
+*   Highlighting the new **Routine-Aware Analysis** for much better clip selection.
+*   Mentioning the new logic that **prioritizes variety** by selecting unique exercises first.
+*   Adding the new **Time-Constrained Speed-Up** feature using the `--max_duration` flag.
+*   Updating the "Blazing-Fast & Lossless" point to clarify that re-encoding happens when necessary (for speed-up or transitions).
+*   Providing new usage examples that showcase these powerful new capabilities.
+
+Here is the updated `README.md` file:
+
+---
+
 # Automated Exercise Video Generator
 
 This project is a Python-based pipeline for automatically creating styled exercise videos with dynamic overlays, sound effects, and background music. It uses a series of configuration files and scripts to combine a single long video recording with animated timers, title cards, and rule-based audio cues, producing a final, edited video ready for platforms like YouTube.
@@ -43,26 +56,32 @@ python create_background_music.py <routine_yaml_path> <output_audio_file>
 **Example:**
 ```bash
 # Generate the full music track for the Monday routine
-python create_background_music.py "routine.yaml" "background_music.m4a"
-```
+python create_background_music.py "routine.yaml" "background_music.m4a"```
 
 ### Action Hook Video Creator
 
 The `create_hook.py` script automatically finds the most motion-intensive scenes in your long video and combines them into a short, high-action preview video. This is perfect for creating social media "hooks."
 
-- **Intelligent Scene Detection:** Analyzes the video to find segments with the most motion. Supports optional GPU (OpenCL) acceleration for faster analysis.
-- **Targeted Analysis:** Use the `--center_focus` flag to analyze only the center of the frame, ignoring background movement and dramatically improving accuracy for subject-focused videos.
-- **Blazing-Fast & Lossless:** Uses FFmpeg stream copy to extract clips without re-encoding, preserving quality and making the process extremely fast.
-- **Highly Customizable:** Control the number of clips, the length of each clip, and the motion detection sensitivity.
+-   **Routine-Aware Analysis:** By providing a `routine.yaml` file, the script intelligently analyzes *only* the exercise segments—ignoring intros, rests, and cool-downs for vastly more accurate and relevant results.
+-   **Prioritizes Variety:** Automatically selects clips from unique exercises first to create a more dynamic and engaging hook video.
+-   **Time-Constrained Speed-Up:** Use the `--max_duration` flag to force the final video into a specific time limit (e.g., 5 seconds). The script automatically calculates the required speed-up factor.
+-   **Targeted Analysis:** Use the `--center_focus` flag to analyze only the center of the frame, ignoring background movement.
+-   **Optional GPU Acceleration:** Supports OpenCL for faster motion analysis.
+-   **Fast Stream Copy (Default):** Extracts clips without re-encoding by default, preserving quality and speed. Re-encoding is only used when transitions or speed-up are required.
 
 **Usage:**
 ```bash
 python create_hook.py <source_video> <num_clips> <clip_duration_sec> [options]
 ```
-**Example:**
+**Example 1: Intelligent Routine-Based Hook**
 ```bash
-# Find the 5 most active 1-second clips, focusing on the center 60% of the video.
-python create_hook.py "final_video.mp4" 5 1 -o "hook.mp4" --gpu --scoring peak --center_focus 0.6
+# Create a 5-clip hook (1 sec each) by analyzing only the action segments from the routine.
+python create_hook.py "final_video.mp4" 5 1 -o "hook_routine.mp4" --routine "routine.yaml"```
+
+**Example 2: Time-Limited, Fast-Paced Hook**
+```bash
+# Create a hook from 4 two-second clips, but speed it up to fit into a 5-second total duration.
+python create_hook.py "final_video.mp4" 4 2.0 -o "hook_fast.mp4" --routine "routine.yaml" --max_duration 5.0
 ```
 
 ### Quality-First Music Downloader
@@ -160,8 +179,7 @@ You can also override the video or audio for a specific segment using the `repla
 The assembly script needs a pre-made timer video for each unique duration in your routine. Run this command for each unique `length` value from your routine file:
 ```bash
 python create_progress_ring.py <duration_in_seconds>
-```
-**Example:** `python create_progress_ring.py 45`
+```**Example:** `python create_progress_ring.py 45`
 
 ### Step 6: Generate the Background Music Track
 
