@@ -1,16 +1,3 @@
-Of course! Based on the new features added to the `create_hook.py` script, I have updated the corresponding section in your `README.md`.
-
-The key changes include:
-*   Highlighting the new **Routine-Aware Analysis** for much better clip selection.
-*   Mentioning the new logic that **prioritizes variety** by selecting unique exercises first.
-*   Adding the new **Time-Constrained Speed-Up** feature using the `--max_duration` flag.
-*   Updating the "Blazing-Fast & Lossless" point to clarify that re-encoding happens when necessary (for speed-up or transitions).
-*   Providing new usage examples that showcase these powerful new capabilities.
-
-Here is the updated `README.md` file:
-
----
-
 # Automated Exercise Video Generator
 
 This project is a Python-based pipeline for automatically creating styled exercise videos with dynamic overlays, sound effects, and background music. It uses a series of configuration files and scripts to combine a single long video recording with animated timers, title cards, and rule-based audio cues, producing a final, edited video ready for platforms like YouTube.
@@ -56,7 +43,8 @@ python create_background_music.py <routine_yaml_path> <output_audio_file>
 **Example:**
 ```bash
 # Generate the full music track for the Monday routine
-python create_background_music.py "routine.yaml" "background_music.m4a"```
+python create_background_music.py "routine.yaml" "background_music.m4a"
+```
 
 ### Action Hook Video Creator
 
@@ -76,7 +64,8 @@ python create_hook.py <source_video> <num_clips> <clip_duration_sec> [options]
 **Example 1: Intelligent Routine-Based Hook**
 ```bash
 # Create a 5-clip hook (1 sec each) by analyzing only the action segments from the routine.
-python create_hook.py "final_video.mp4" 5 1 -o "hook_routine.mp4" --routine "routine.yaml"```
+python create_hook.py "final_video.mp4" 5 1 -o "hook_routine.mp4" --routine "routine.yaml"
+```
 
 **Example 2: Time-Limited, Fast-Paced Hook**
 ```bash
@@ -141,33 +130,27 @@ pip install -r requirements.txt
 
 ### Step 1: Download Background Music (Optional)
 
-Use the included downloader to populate your music library. You can create subfolders for different genres (e.g., `assets/music/high-energy`, `assets/music/calm`).
+Use the included downloader to populate your music library.
 ```bash
 python download_music_from_youtube_playlists.py "assets/music" <youtube_url>
 ```
 
 ### Step 2: Configure Your Style & Audio
 
-Open `config.yaml` and edit the settings. This is where you set everything: fonts, colors, video resolution, your color grading LUT(s), sound effects, `background_music` rules, and the new `audio_optimization` settings.
+Open `config.yaml` and edit the settings. This is where you set everything from fonts and colors to audio mastering rules.
 
 ### Step 3: Add Audio Assets
 
-1.  Place your sound effect files (e.g., `swoosh.wav`) in the `assets/sounds/` directory.
-2.  Ensure your background music files are organized in the `assets/music/` directory.
+Place your sound effects and background music into the appropriate subfolders within `assets/`.
 
 ### Step 4: Define Your Routine
 
-Open or create a `routine.yaml` file. List each exercise or rest period with its `name` and `length` in seconds.
+Open or create a `routine.yaml` file. List each exercise or rest period with its `name` and `length`. To create an automated intro, add a segment named `"intro"` and give it a `replace_video` key pointing to where the intro video should be saved.
 
-You can also override the video or audio for a specific segment using the `replace_video` and `replace_audio` keys. This is perfect for adding custom, pre-edited intros or outros.
-
-**Example `routine.yaml` with Overrides:**
-```yaml
-- name: "Intro"
-  length: 10
-  # This segment's video is replaced by your premade intro.
-  # The audio still comes from the main source video, as requested.
-  replace_video: 'C:/assets/my_premade_intro.mov'
+**Example `routine.yaml` for an automated intro:**```yaml
+- name: "intro"
+  length: 5 # The final length of your generated hook/intro video
+  replace_video: 'C:/Users/Preston/Videos/MyIntro.mp4'
 
 - name: "Burpees"
   length: 45
@@ -176,52 +159,47 @@ You can also override the video or audio for a specific segment using the `repla
 
 ### Step 5: Generate Timer Assets
 
-The assembly script needs a pre-made timer video for each unique duration in your routine. Run this command for each unique `length` value from your routine file:
+The assembly script needs a timer for each unique duration in your routine. Run this command for each `length` value.
 ```bash
 python create_progress_ring.py <duration_in_seconds>
-```**Example:** `python create_progress_ring.py 45`
+```
+**Example:** `python create_progress_ring.py 45`
 
 ### Step 6: Generate the Background Music Track
 
-Run the new script to create a single audio file for the entire routine.
-```bash
+Create the continuous background music file for the entire routine.```bash
 python create_background_music.py routine.yaml background_music.m4a
 ```
 
-### Step 7: Assemble the Final Video
+### Step 7: Create Action Hook Video (Automated as Intro)
 
-The main script now accepts the background music file as a new argument, `--bgm`. After the video segments are concatenated, the script will automatically run the final audio optimization pass if it's enabled in your `config.yaml`.
-
-**Command Structure:**
+Generate the high-action hook video. When using the main workflow script below, this step is done automatically.
 ```bash
-python assemble_video.py <routine_file> <source_video> <output_video> --bgm <music_file> [options]
+python create_hook.py "source_video.MOV" 5 1 -o "intro.mp4" --routine "routine.yaml"
 ```
 
-**Example 1: Full Quality Render with Music**
+### Step 8: Assemble the Final Video
+
+Combine all assets into the final, polished video.
 ```bash
-python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "final_video.mp4" --bgm "background_music.m4a"
+python assemble_video.py routine.yaml "source_video.MOV" "final_video.mp4" --bgm "background_music.m4a"
 ```
 
-**Example 2: Test a Single Segment with Music**
-```bash
-python assemble_video.py routine.yaml "D:/Video/raw_workout.MOV" "test_preview.mp4" --bgm "background_music.m4a" --segments 3 --test -v
-```
+## The One-Command Workflow (`run_workflow.py`)
 
-## Automated Workflow Script (Recommended)
+The `run_workflow.py` script is the recommended way to generate videos. It combines all the necessary steps into a single, intelligent command.
 
-To simplify the video creation process, you can use the provided `run_workflow.py` script. This script automatically performs Steps 5, 6, and 7 in a single command, making it the most efficient way to generate a complete video. It reads your routine file to determine which timers to create before generating the music and assembling the final video.
-
-- **Purpose:** Automates timer generation, background music creation, and final video assembly.
-- **Features:**
-    - Intelligently parses your `routine.yaml` to create only the required timer assets.
-    - Provides real-time progress output during the video assembly stage.
-    - Passes through key options like `--start` to trim the source video.
+- **Purpose:** To be a one-stop-shop for creating the final video and a high-action intro sequence.
+- **Key Automation Features:**
+    - **Performs All Steps:** Automatically runs the timer generation (Step 5), background music creation (Step 6), hook video generation (Step 7), and final assembly (Step 8).
+    - **Smart Intro Creation:** It automatically performs a "routine-aware" analysis to find the best action clips for the hook. It then saves this hook video directly to the file path you specified in your `intro` segment's `replace_video` key in `routine.yaml`.
+    - **Provides real-time progress** output for easy monitoring.
 
 **Usage:**
 ```bash
 # General structure
 python run_workflow.py <routine_yaml_path> <source_video_path> [options]
 
-# Example: Create the Monday video, trimming the first 30 seconds of the source footage
+# Example: Create the Monday video and its automated intro, trimming the first 30 seconds
 python run_workflow.py "routine.yaml" "D:/Video/raw_workout.MOV" --start 30
 ```

@@ -1,13 +1,3 @@
-Yes, absolutely. The `prompt.md` is a critical document for ensuring the project can be regenerated accurately. Based on the significant feature enhancements we made to `create_hook.py`, its description in the prompt is now outdated.
-
-I have updated the `create_hook.py` section to reflect its final, more powerful capabilities, including routine-aware analysis, unique exercise prioritization, and the max duration/speed-up feature. The rest of the document is accurate and remains unchanged.
-
-Here is the updated `prompt.md` file:
-
----
-
-# prompt.md
-
 I need you to act as an expert Python developer and FFmpeg specialist. Your task is to re-create a complete, automated pipeline for generating styled exercise videos based on a pre-existing, functional set of Python scripts and a YAML configuration file.
 
 You must adhere to the final, stable architecture provided.
@@ -83,23 +73,22 @@ This utility pre-generates the entire background audio track for a routine.
 ### 7. Documentation
 
 Provide:
-- A `requirements.txt` file listing:
-PyYAML
-Pillow
-yt-dlp
+- A `requirements.txt` file listing: PyYAML, Pillow, yt-dlp.
 - A comprehensive `README.md` file covering the video generator and all utility scripts.
 - The `prompt.md` file itself for project regeneration.
 
 ### 8. `run_workflow.py` (Orchestrator)
 
 This is a top-level helper script designed to simplify the entire video creation process by chaining the necessary steps together.
-- **Purpose:** To act as a single command-line interface for the most common end-to-end workflow (generating assets and assembling the video).
+- **Purpose:** To act as a single command-line interface for the most common end-to-end workflow.
 - **Process:**
-  1. Parse the specified routine YAML file to identify all unique segment lengths.
-  2. Execute `create_progress_ring.py` for each unique length to ensure all timer assets exist.
-  3. Execute `create_background_music.py` to generate the complete audio track.
-  4. Execute `assemble_video.py` with the correct inputs to build the final video.
-- **Input:** Must accept positional arguments `routine_file` and `source_video`, along with an optional `--start` flag that is passed directly to `assemble_video.py`.
+  1.  Parse the specified `routine.yaml` file to identify unique timer lengths and locate the intro video path.
+  2.  Execute `create_progress_ring.py` for each unique length to ensure all timer assets exist.
+  3.  Execute `create_background_music.py` to generate the complete audio track.
+  4.  Execute `create_hook.py` to generate a high-action video. This script *must* use the `routine.yaml` to perform an intelligent, routine-aware analysis.
+  5.  Execute `assemble_video.py` with all the generated assets to build the final video.
+- **Smart Intro Integration:** The orchestrator must automatically search the parsed routine for a segment named `"intro"`. If that segment contains a `replace_video` key, its path must be used as the `--output` for the `create_hook.py` script. If not found, it should fall back to a default `_hook.mp4` filename.
+- **Input:** Must accept positional arguments `routine_file` and `source_video`, along with an optional `--start` flag that is passed directly to *both* `create_hook.py` and `assemble_video.py`.
 - **Subprocess Handling:**
   - Must explicitly use the Python executable from the active virtual environment (`sys.executable`) when calling other scripts to prevent `ModuleNotFoundError`.
   - Must ensure that output from child scripts (especially `assemble_video.py`) is streamed to the console in real-time and unbuffered.
