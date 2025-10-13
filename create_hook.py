@@ -451,7 +451,7 @@ def main():
     adv_group.add_argument('--max_duration', type=float, help="Maximum final video duration. Speeds up the video to fit if needed.")
     adv_group.add_argument("--gpu", action=argparse.BooleanOptionalAction, default=True, help="Use GPU (OpenCL) for the analysis phase. Does not affect encoding. Default is on.")
     adv_group.add_argument("--cl_device", type=str, default="0.0", help="The OpenCL device to use for analysis. (default: 0.0)")
-    adv_group.add_argument('--transition', choices=[None, 'white'], default=None, help="Adds a 'dip to white' transition. This requires re-encoding.")
+    adv_group.add_argument('--transition', choices=[None, 'white'], default='white', help="Adds a 'dip to white' transition. This requires re-encoding.")
     adv_group.add_argument('--encoder', type=str, default='hevc_nvenc', help="Video encoder for transitions. HW options: h264_nvenc, hevc_nvenc (NVIDIA), h264_videotoolbox (macOS), h264_amf (AMD). (default: hevc_nvenc)")
     adv_group.add_argument('--scoring', choices=['sum', 'peak'], default='sum', help="[Legacy] Scoring method for non-routine analysis. 'sum' for sustained action, 'peak' for spikes. Default: sum.")
     adv_group.add_argument('--center_focus', type=float, help="Focus analysis on the center X%% of the video (value from 0.1 to 1.0).")
