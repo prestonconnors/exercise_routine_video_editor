@@ -93,6 +93,8 @@ def create_background_music(
     current_block = None
 
     print("\n  > Planning audio timeline...")
+    previous_rule = None # Keep track of the rule from the previous segment
+
     for i, exercise in enumerate(routine):
         seg_dur = float(exercise.get('length', 0)); time_left_in_seg = seg_dur
         if seg_dur <= 0: continue
@@ -114,8 +116,9 @@ def create_background_music(
                 song_blocks.append({'file': rule_file, 'start': 0, 'duration': seg_dur, 'mode': 'loop'})
                 
                 current_block = None; active_track = None
-                active_playlist_deque = global_playlist_deque
+                active_playlist_deque = global_playlist_deque # Reset playlist for after the loop
                 active_source_files = global_source_files
+                previous_rule = matched_rule # Update previous rule tracker
                 continue
 
             if 'folder' in matched_rule:
@@ -135,10 +138,19 @@ def create_background_music(
                     active_playlist_deque = global_playlist_deque
                     active_source_files = global_source_files
         else:
-            if active_playlist_deque is not global_playlist_deque:
-                 print(f"    - Segment {i+1} ('{ex_name}'): No rule. Current song will continue; next track from Main playlist.")
+            # No rule matched this segment. Check if we just EXITED a rule.
+            if previous_rule and active_playlist_deque is not global_playlist_deque:
+                 exit_behavior = previous_rule.get('exit_behavior', 'immediate') # Default to 'immediate'
+                 
+                 print(f"    - Segment {i+1} ('{ex_name}'): Rule '{previous_rule.get('name')}' ended. Exit behavior: '{exit_behavior}'.")
+
                  active_playlist_deque = global_playlist_deque
                  active_source_files = global_source_files
+                 
+                 if exit_behavior == 'immediate':
+                     # Force an immediate track change away from the old rule's music.
+                     interruption_forced = True
+                 # If 'playout', we do NOT force an interruption, letting the song finish.
                  
         if interruption_forced:
             if current_block: song_blocks.append(current_block)
@@ -169,6 +181,8 @@ def create_background_music(
             
             current_block['duration'] += play_dur; active_track_played += play_dur
             time_left_in_seg -= play_dur
+            
+        previous_rule = matched_rule # Update previous rule at the end of the segment logic
 
     if current_block: song_blocks.append(current_block)
 
@@ -201,7 +215,6 @@ def create_background_music(
         prev_b = song_blocks[i-1]; curr_b = song_blocks[i]
         out_name = f"[c{i}]"
 
-        # ** THE CORRECTED LOGIC IS HERE **
         should_crossfade = (
             crossfade_duration > 0 and
             prev_b.get('file') is not None and
@@ -233,6 +246,7 @@ def create_background_music(
     print(f"  > Outputting with '{codec}' codec.")
 
     ffmpeg_cmd.extend(['-filter_complex', ";".join(filter_complex), '-map', final_stream])
+    ffmpeg_cmd.extend(output_params) # Add codec parameters here
     ffmpeg_cmd.append(str(output_path))
     
     if verbose_mode: print("\n  > Assembled FFmpeg command:", ' '.join(f"'{c}'" for c in ffmpeg_cmd))

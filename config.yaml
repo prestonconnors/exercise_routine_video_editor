@@ -106,6 +106,7 @@ background_music:
       triggers: ['Intro']
       folder: 'assets/music/Intro'
       mode: 'continue'
+      exit_behavior: 'playout' # Allows the intro song to finish before the main playlist starts.
 
 # -- Section 8: Final Video Output Settings --
 video_output:

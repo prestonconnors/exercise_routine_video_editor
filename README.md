@@ -35,6 +35,7 @@ The `create_background_music.py` script is a powerful utility that pre-generates
 - **"Radio Mix" Style Playback:** A song will play across multiple exercise segments until it ends, then a new random song will be chosen.
 - **Rule-Based Playlists:** Use a `folder:` key in your `background_music` rules to create themed playlists (e.g., "high-energy," "cool-down") that automatically trigger for specific exercises.
 - **Automatic Crossfading:** When a rule forces a song to change, the script automatically generates a smooth crossfade between the outgoing and incoming tracks.
+- **Flexible Transition Control:** Fine-tune how music changes when a rule *ends*. Add an optional `exit_behavior: 'playout'` key to a rule in `config.yaml` to let its song (like an intro track) finish playing naturally. The default behavior is `'immediate'`, which cuts the music instantly for abrupt changes (like starting a cool-down).
 
 **Usage:**
 ```bash
@@ -123,8 +124,7 @@ Your project folder should be set up like this for the scripts to work correctly
 
 In your terminal, navigate to the project folder and run:
 ```bash
-pip install -r requirements.txt
-```
+pip install -r requirements.txt```
 
 ## Workflow: How to Create a Video
 

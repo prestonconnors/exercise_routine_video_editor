@@ -68,6 +68,7 @@ This utility pre-generates the entire background audio track for a routine.
     - **Continuous Playback:** Implements a "radio mix" style where songs play across segments until they finish or a rule forces an interruption.
     - **Rule-Based Playlists:** Supports `file:` rules for specific tracks and `folder:` rules to draw randomly from a themed playlist.
     - **Automatic Crossfading:** Seamlessly crossfades between tracks when a song ends or a rule forces a change, using a `crossfade_duration` setting from the config.
+    - **Flexible Rule Exit Behavior:** The system needs to handle the transition out of a rule-driven segment with more nuance.
 - **Input:** Must accept positional arguments for the routine file and the output audio file.
 
 ### 7. Documentation
