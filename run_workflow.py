@@ -72,7 +72,7 @@ def main(args):
         print(f"❌ ERROR: Could not parse YAML file '{args.routine_file}'. Reason: {e}")
         sys.exit(1)
 
-    '''# === WORKFLOW STEP 5: GENERATE TIMER ASSETS ===
+    # === WORKFLOW STEP 5: GENERATE TIMER ASSETS ===
     print("▶️ STEP 5: Generating Timer Assets")
     unique_lengths = set(int(item['length']) for item in routine_data if 'length' in item and isinstance(item['length'], (int, float)))
 
@@ -81,7 +81,7 @@ def main(args):
     else:
         print(f"✅ Found {len(unique_lengths)} unique timer duration(s): {sorted(list(unique_lengths))}")
         for length in sorted(list(unique_lengths)):
-            run_command([python_executable, "create_progress_ring.py", str(length)])'''
+            run_command([python_executable, "create_progress_ring.py", str(length)])
 
     # === WORKFLOW STEP 6: GENERATE THE BACKGROUND MUSIC TRACK ===
     print("\n▶️ STEP 6: Generating Background Music Track")
