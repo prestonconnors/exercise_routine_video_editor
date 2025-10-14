@@ -211,6 +211,7 @@ def create_background_music(
         filter_complex.append(chain)
 
     last_chain = "[b0]"
+    num_crossfades = 0
     for i in range(1, len(song_blocks)):
         prev_b = song_blocks[i-1]; curr_b = song_blocks[i]
         out_name = f"[c{i}]"
@@ -223,6 +224,7 @@ def create_background_music(
         )
         
         if should_crossfade:
+            num_crossfades += 1
             print(f"    - Applying crossfade: '{prev_b['file'].name}' -> '{curr_b['file'].name}'")
             filter_complex.append(f"{last_chain}[b{i}]acrossfade=duration={crossfade_duration}:curve1=tri:curve2=tri{out_name}")
         else:
@@ -231,11 +233,15 @@ def create_background_music(
         
     final_stream = last_chain
     fade_dur = bgm_cfg.get('fade_duration', 0)
-    if fade_dur > 0 and total_duration > fade_dur * 2:
-        fade_start = total_duration - fade_dur
-        filter_complex.append(f"{last_chain}afade=type=in:duration={fade_dur},afade=type=out:start_time={fade_start:.3f}:duration={fade_dur}[final_a]")
+    
+    # Calculate the actual duration after considering the shortening effect of crossfades.
+    actual_duration = total_duration - (num_crossfades * crossfade_duration)
+
+    if fade_dur > 0 and actual_duration > fade_dur:
+        fade_start = actual_duration - fade_dur
+        filter_complex.append(f"{last_chain}afade=type=out:start_time={fade_start:.3f}:duration={fade_dur}[final_a]")
         final_stream = "[final_a]"
-        print(f"  > Applying {fade_dur}s global fade-in/out.")
+        print(f"  > Applying {fade_dur}s global fade-out.")
 
     output_params = []; out_ext = output_path.suffix.lower()
     codec_map = {'.flac':'flac', '.mp3':'libmp3lame', '.m4a':'aac'}

@@ -150,3 +150,12 @@ audio_optimization:
     target_i: -16      # Target Integrated Loudness (LUFS)
     target_lra: 11     # Target Loudness Range (LU)
     target_tp: -1.5    # Target True Peak (dBFS)
+
+# -- Section 11: Performance Settings (NEW) --
+performance:
+  # Number of segments to process in parallel.
+  # On consumer NVIDIA GPUs (GeForce), this is limited by the hardware encoder session limit (usually 3-5).
+  # Setting this too high may cause FFmpeg to fail with an "out of memory" or session creation error.
+  # On professional cards (Quadro/Tesla), you can set this higher.
+  # A good starting point is 3. Set to 1 to disable parallel processing entirely.
+  num_workers: 3

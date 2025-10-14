@@ -17,7 +17,7 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
   - Supports rule-based playlists by using a `folder:` key to draw random tracks from a specific directory for certain exercises.
   - **Smooth Transitions:** Automatically crossfades between tracks when a rule forces a song change.
   - **Audio Ducking:** Professional-grade feature that automatically lowers the music volume when a sound effect plays, ensuring clarity.
-  - **Global Fade:** Apply an automated fade-in and fade-out at the end of the final video for a polished finish.
+  - **Polished Finish:** Automatically applies a configurable fade-out at the end of the background music track for a professional feel.
 - **Automated Asset Generation:** The `create_progress_ring.py` script automatically generates high-quality, reusable animated timer assets.
 - **Professional 10-Bit HDR Workflow:** Preserves color fidelity from source to output using a 10-bit pipeline and sequential `.cube` LUT application.
 - **Robust A/V Synchronization:** Guarantees perfect sync by re-encoding the final audio track with a sophisticated `amix` filter graph.
@@ -36,6 +36,7 @@ The `create_background_music.py` script is a powerful utility that pre-generates
 - **Rule-Based Playlists:** Use a `folder:` key in your `background_music` rules to create themed playlists (e.g., "high-energy," "cool-down") that automatically trigger for specific exercises.
 - **Automatic Crossfading:** When a rule forces a song to change, the script automatically generates a smooth crossfade between the outgoing and incoming tracks.
 - **Flexible Transition Control:** Fine-tune how music changes when a rule *ends*. Add an optional `exit_behavior: 'playout'` key to a rule in `config.yaml` to let its song (like an intro track) finish playing naturally. The default behavior is `'immediate'`, which cuts the music instantly for abrupt changes (like starting a cool-down).
+- **Automatic Fade-Out:** For a professional finish, the script reads your `config.yaml` and correctly applies a global fade-out to the end of the completed music track, even when crossfades are used.
 
 **Usage:**
 ```bash
@@ -84,8 +85,7 @@ Included is `download_music_from_youtube_playlists.py`, a powerful script for do
 
 **Usage:**
 ```bash
-python download_music_from_youtube_playlists.py "<output_folder>" <youtube_url_or_playlist>
-```
+python download_music_from_youtube_playlists.py "<output_folder>" <youtube_url_or_playlist>```
 **Example:**
 ```bash
 # Download a playlist into the project's music folder
