@@ -149,7 +149,7 @@ Your project folder should be set up like this for the scripts to work correctly
 
 ### 1. Prerequisites
 
-- **Python 3.8+**
+- **Python 3.14.4+** (developed and tested on CPython 3.14.4 — a `.python-version` file is included for `pyenv`/`pyenv-win`).
 - **FFmpeg & FFprobe:** Must be installed and accessible in your system's PATH.
 - **NVIDIA GPU with CUDA Toolkit installed** (for `assemble_video.py`). An OpenCL-compatible GPU can be used for `create_hook.py`.
 

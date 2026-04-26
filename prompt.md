@@ -1,5 +1,7 @@
 I need you to act as an expert Python developer and FFmpeg specialist. Your task is to re-create a complete, automated pipeline for generating styled exercise videos based on a pre-existing, functional set of Python scripts and a YAML configuration file.
 
+The project targets **CPython 3.14.4+**. All code must use modern type-hint syntax (PEP 604 unions like `str | None`, PEP 585 builtin generics like `list[str]` / `dict[str, str]`), and avoid any module/API removed by Python 3.14 (e.g. `imp`, `distutils`, `cgi`, `pipes`, `crypt`, `imghdr`, `aifc`, `chunk`, `sndhdr`, `sunau`, `nntplib`, `xdrlib`, `mailcap`, `telnetlib`). Pin a `.python-version` file to `3.14.4`.
+
 You must adhere to the final, stable architecture provided.
 
 ### 1. `config.yaml`
@@ -80,8 +82,9 @@ This utility pre-generates the entire background audio track for a routine.
 ### 7. Documentation
 
 Provide:
-- A `requirements.txt` file listing: PyYAML, Pillow, yt-dlp, mutagen, numpy.
-- A comprehensive `README.md` file covering the video generator and all utility scripts, including a Performance & Caching section.
+- A `requirements.txt` file (UTF-8, no BOM) listing minimum versions known to ship Python 3.14 wheels: `PyYAML>=6.0.2`, `Pillow>=11.0`, `yt-dlp>=2025.10.1`, `mutagen>=1.47.0`, `numpy>=2.2.0`.
+- A `.python-version` file containing `3.14.4`.
+- A comprehensive `README.md` file covering the video generator and all utility scripts, including a Performance & Caching section. The README must list **Python 3.14.4+** as a prerequisite.
 - The `prompt.md` file itself for project regeneration.
 
 ### 7a. `combine_luts.py` (LUT Pre-Bake Utility)

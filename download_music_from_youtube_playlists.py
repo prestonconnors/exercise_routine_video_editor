@@ -8,7 +8,7 @@ Strategy:
 - Embed metadata and thumbnail art for both paths.
 
 Requirements:
-- Python 3.8+
+- Python 3.14+
 - pip install yt-dlp
 - FFmpeg must be on PATH (yt-dlp uses it for embedding/convert)
 
