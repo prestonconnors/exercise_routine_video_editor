@@ -7,7 +7,9 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
 ## Features
 
 - **Centralized Styling:** All visual elements (colors, fonts, sizes, positions) are controlled in a single `config.yaml` file.
-- **Efficient Re-rendering:** The pipeline automatically detects and reuses previously rendered video segments, only encoding new or changed portions.
+- **Parallel Segment Rendering:** Renders multiple segments concurrently across the GPU's NVENC sessions, governed by `performance.num_workers` in `config.yaml`.
+- **Manifest-Based Re-rendering:** Each rendered segment is fingerprinted (source mtime, trim window, overlays, audio rules, codec settings, LUT chain). A manifest at `.cache/segments_manifest.json` lets the pipeline skip unchanged segments instantly without re-probing.
+- **Pre-Baked LUT Chain:** When multiple `.cube` LUTs are configured, they are automatically combined into a single cached LUT (`.cache/luts/combined_*.cube`) on first use, roughly halving per-frame LUT cost at 4K with no perceptible quality difference.
 - **Rule-Based Sound Effects:** Define a library of sound effects and create rules to automatically play sounds based on keywords in the exercise name.
 - **Segment Media Overrides:** Easily replace the video and/or audio for any specific segment (like an intro or outro) directly within your `routine.yaml`.
 - **(New) Final Audio Mastering:** An automated, two-stage process produces professional, platform-ready audio. First, it applies vocal enhancement (EQ for clarity, compression for consistency) during segment rendering. Then, after the video is assembled, it performs a final EBU R128 loudness normalization pass to meet YouTube/Instagram standards, all without re-encoding the video.
@@ -19,10 +21,36 @@ The entire workflow is driven by FFmpeg, orchestrated by Python, and styled via 
   - **Audio Ducking:** Professional-grade feature that automatically lowers the music volume when a sound effect plays, ensuring clarity.
   - **Polished Finish:** Automatically applies a configurable fade-out at the end of the background music track for a professional feel.
 - **Automated Asset Generation:** The `create_progress_ring.py` script automatically generates high-quality, reusable animated timer assets.
-- **Professional 10-Bit HDR Workflow:** Preserves color fidelity from source to output using a 10-bit pipeline and sequential `.cube` LUT application.
-- **Robust A/V Synchronization:** Guarantees perfect sync by re-encoding the final audio track with a sophisticated `amix` filter graph.
-- **GPU-First Architecture:** The pipeline is optimized to use the GPU (CUDA/NVENC) for decoding, scaling, and encoding for maximum performance.
+- **Professional 10-Bit HDR Workflow:** Preserves color fidelity from source to output using a 10-bit pipeline and (auto-combined) `.cube` LUT application with tetrahedral interpolation.
+- **Robust A/V Synchronization:** Guarantees perfect sync via a sophisticated `amix` filter graph during segment rendering. Final concatenation is a lossless stream copy of both video *and* audio, avoiding extra AAC generations.
+- **GPU-First Architecture:** The pipeline is optimized to use the GPU (CUDA/NVENC) for decoding, scaling, and encoding for maximum performance, with multi-threaded CPU filtering for `lut3d`/`zscale`/`unsharp`.
 - **Powerful Rendering Options:** Includes test mode (`--test`), partial rendering (`--segments`), source trimming (`--start`, `--end`), and forced re-rendering (`--force-render`).
+
+## Performance & Caching
+
+The pipeline is tuned for high-quality 4K output on a single consumer NVIDIA GPU. The largest wins come from running multiple segments in parallel and avoiding redundant work between runs.
+
+### Parallel Segment Rendering
+
+Set `performance.num_workers` in `config.yaml`. On consumer NVIDIA cards (GeForce) the encoder session limit is typically 3–5; start at `3` and back off if you see NVENC "out of memory" or session-creation errors. Set `1` to disable parallelism.
+
+Segment-level randomness (e.g. SFX rules, `start_time: 'random'`) is resolved on the main thread with a per-segment seeded RNG, so reruns are byte-identical regardless of scheduling order.
+
+### Segment Manifest Cache
+
+Every rendered segment writes a SHA-256 fingerprint to `.cache/segments_manifest.json` covering every input that affects the rendered bytes (trim window, source mtime, replacement clips, timer file, BGM offset/mtime, SFX rule + delay, codec/quality settings, LUT chain, audio optimization). On the next run, segments whose fingerprints match are reused instantly without invoking `ffprobe`. Pre-existing temps without a manifest entry fall back to a one-time `ffprobe` validity check, then get fingerprinted automatically.
+
+Use `--force-render` to invalidate the cache and re-encode everything.
+
+### Pre-Baked LUT (`combine_luts.py`)
+
+When `source_video_processing.lut_files` lists more than one `.cube` LUT, the pipeline combines them into a single equivalent LUT on first use and caches the result under `.cache/luts/`. This applies one `lut3d` filter at runtime instead of N, roughly halving the LUT cost at 4K. The cache key is each input LUT's path + mtime + size, so editing or replacing a `.cube` invalidates the cache automatically.
+
+You can also run the combiner manually:
+
+```bash
+python combine_luts.py luts/VLog_to_V709.cube luts/final.cube --output luts/combined.cube
+```
 
 ## Utility Scripts
 
@@ -101,13 +129,18 @@ Your project folder should be set up like this for the scripts to work correctly
 │   ├── sounds/       <-- Place your .wav or .mp3 sound effects here
 │   └── timers/       <-- Generated timer assets will be saved here
 ├── luts/             <-- Place your .cube LUT files here
+├── .cache/           <-- (Auto-generated) segment manifest + combined LUTs
+│   ├── luts/
+│   └── segments_manifest.json
 ├── config.yaml
 ├── routine.yaml
 ├── assemble_video.py
+├── combine_luts.py
 ├── create_hook.py
 ├── create_progress_ring.py
 ├── create_background_music.py
 ├── download_music_from_youtube_playlists.py
+├── run_workflow.py
 ├── requirements.txt
 └── README.md
 ```

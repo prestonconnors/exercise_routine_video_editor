@@ -13,7 +13,8 @@ The configuration file must support a highly detailed structure, including:
 - **`sound_effects`:** A section to control audio overlays, with a library of effects and rules to trigger them.
 - **`video_output`:** Default resolution, encoder, audio settings, `bit_depth`, and advanced NVENC tuning parameters.
 - **`test_mode_settings`:** A section that overrides keys from `video_output`.
-- **`audio_optimization`:** (New) A dedicated section for final audio mastering, including vocal enhancement (EQ, compression) and EBU R128 loudness normalization targets.
+- **`audio_optimization`:** A dedicated section for final audio mastering, including vocal enhancement (EQ, compression) and EBU R128 loudness normalization targets.
+- **`performance`:** A section controlling parallelism. Must include `num_workers` (integer; how many segments to render concurrently across NVENC sessions).
 
 ### 2. `create_progress_ring.py`
 
@@ -25,18 +26,23 @@ This is the main orchestration script that builds the final video.
 - **Input:** Must accept positional arguments: `routine.yaml`, `source_video`, `output_video`, and optional flags: `--bgm`, `--segments`, `--start`, `--end`, `--test`, `--force-render`, `--verbose`, `--config`.
 
 **Functional Requirements:**
-1.  **Dynamic Bit Depth Pipeline:** Must use `ffprobe` to determine the source pixel format and dynamically select correct pixel formats for processing.
+1.  **Dynamic Bit Depth Pipeline:** Must use `ffprobe` to determine the source pixel format and dynamically select correct pixel formats for processing. The probe result must be cached per-path so repeat calls are free.
 2.  **Smart Codec Handling:** Must automatically switch to `hevc_nvenc` if a `bit_depth` of 10 is requested with an h264 encoder.
 3.  **Complex Audio Mixing with Ducking:**
     - Must accept an optional path to a pre-generated background music file via the `--bgm` flag.
     - Must build a multi-input audio filter graph to combine source audio, background music, and triggered sound effects.
     - Must correctly implement audio ducking using the `sidechaincompress` filter to lower the background music volume when a sound effect is active.
     - Must use `amix` to combine all final audio streams into a single track.
-4.  **Filter Architecture (GPU-First):** Must perform GPU-native scaling (`scale_cuda`) before downloading the frame for CPU-based filters (`zscale`, `lut3d`, `unsharp`) and overlays (`drawtext`).
-5.  **Segment-Level Media Overrides:** Must support `replace_video` and `replace_audio` keys within the `routine.yaml` file for any segment, allowing users to substitute specific video or audio clips (e.g., for custom intros/outros) while maintaining all other processing like overlays and effects.
-6.  **Robust Final Assembly:** The concatenation step must copy the video stream but re-encode the audio with `aresample` to guarantee A/V synchronization.
-7.  **(New) Two-Stage Audio Mastering:** Must implement a final, two-stage audio optimization process controlled via the config file. This includes (a) vocal enhancement filters (EQ, compression) applied during segment rendering and (b) a two-pass EBU R128 loudness normalization (`loudnorm`) applied to the final concatenated video *without* re-encoding the video stream.
-
+4.  **Filter Architecture (GPU-First):** Must perform GPU-native scaling (`scale_cuda`) before downloading the frame for CPU-based filters (`zscale`, `lut3d`, `unsharp`) and overlays (`drawtext`). Must NOT pass `-threads 1`/`-filter_threads 0`; let FFmpeg auto-pick threads so the CPU filter graph scales across cores. `lut3d` must use tetrahedral interpolation. Avoid the BT.2020/HLG `zscale` round-trip around the LUT chain (a no-op for V-Log→Rec.709 LUTs); only normalize range to/from full as needed.
+5.  **Pre-Baked LUT Chain:** When `source_video_processing.lut_files` contains more than one existing `.cube` file, the pipeline must combine them into a single equivalent cached LUT (under `.cache/luts/`, keyed on input path/mtime/size) by importing `get_or_build_combined_lut` from `combine_luts.py`. The runtime filter graph must then apply exactly one `lut3d` filter.
+6.  **Segment-Level Media Overrides:** Must support `replace_video` and `replace_audio` keys within the `routine.yaml` file for any segment, allowing users to substitute specific video or audio clips (e.g., for custom intros/outros) while maintaining all other processing like overlays and effects.
+7.  **Parallel Segment Rendering:** Must process segments in two passes:
+    - **Pass 1 (sequential, cheap):** Build a list of fully resolved per-segment tasks. All randomness (SFX rule selection, `start_time: 'random'`) must be resolved here using a per-segment seeded RNG (e.g. `random.Random(f"{source}|{i}|{name}")`) so reruns are byte-identical regardless of scheduling order. Each task must include a SHA-256 fingerprint covering every input that affects the rendered bytes (trim window, source mtime, replacement clips + mtimes, timer file, BGM path/offset/mtime, SFX rule + computed delay, codec/quality settings, LUT chain, audio optimization config).
+    - **Pass 2 (parallel):** Render missing segments via `concurrent.futures.ThreadPoolExecutor(max_workers=performance.num_workers)`. Each worker must collect its log lines and emit them as a contiguous block on completion so per-segment logs stay grouped. The number of workers must be capped to the number of pending tasks.
+8.  **Manifest-Based Reuse Cache:** Must persist a JSON manifest at `.cache/segments_manifest.json` mapping `temp_segment_<i>.mp4` → fingerprint. On startup, segments whose temp file exists, is non-empty, and matches the fingerprint must be reused without invoking `ffprobe`. Pre-existing temps with no manifest entry must fall back to a one-time `ffprobe` validity check (`is_video_file_valid`) and then be fingerprinted into the manifest. `--force-render` must bypass the manifest entirely.
+9.  **Robust Final Assembly:** Concatenation must be a lossless stream copy of *both* video and audio (`-c copy`). Audio re-encoding only happens later in the loudness normalization pass.
+10. **NVENC Tuning:** When the codec is `h264_nvenc`/`hevc_nvenc`, the encoder must use `-rc-lookahead 20 -spatial_aq 1 -temporal_aq 1 -aq-strength 8 -rc vbr -tune hq -multipass qres -bf 3` (note: `qres`, not `fullres` — visually indistinguishable but ~1.5× faster). For `hevc_nvenc`, set `-profile:v main10` for 10-bit, otherwise `main`.
+11. **Two-Stage Audio Mastering:** Must implement a final, two-stage audio optimization process controlled via the config file. This includes (a) vocal enhancement filters (EQ, compression) applied during segment rendering and (b) a two-pass EBU R128 loudness normalization (`loudnorm`) applied to the final concatenated video *without* re-encoding the video stream.
 ### 4. `create_hook.py` (New Utility)
 
 This utility script automatically creates a short "hook" or "preview" video from a longer source.
@@ -74,9 +80,17 @@ This utility pre-generates the entire background audio track for a routine.
 ### 7. Documentation
 
 Provide:
-- A `requirements.txt` file listing: PyYAML, Pillow, yt-dlp.
-- A comprehensive `README.md` file covering the video generator and all utility scripts.
+- A `requirements.txt` file listing: PyYAML, Pillow, yt-dlp, mutagen, numpy.
+- A comprehensive `README.md` file covering the video generator and all utility scripts, including a Performance & Caching section.
 - The `prompt.md` file itself for project regeneration.
+
+### 7a. `combine_luts.py` (LUT Pre-Bake Utility)
+
+A standalone utility that pre-bakes a chain of `.cube` 3D LUTs into a single equivalent `.cube` LUT, callable both as a CLI and as a library.
+- **API:** Must export `get_or_build_combined_lut(lut_paths, cache_dir='.cache/luts', output_size=None) -> str`. The function returns the path to a cached combined LUT, building it on cache miss. Cache key must be a stable hash over each input LUT's absolute path, mtime, and size (and the requested output grid size, if any).
+- **CLI:** `python combine_luts.py <lut1.cube> <lut2.cube> [...] --output <out.cube> [--size N]`.
+- **Math:** Must parse `LUT_3D_SIZE`, `DOMAIN_MIN`, `DOMAIN_MAX`, and the sample list; apply LUTs in order via trilinear interpolation; default the output grid size to the maximum of the input grid sizes.
+- **Dependencies:** `numpy` only (no OpenColorIO/Pillow requirement).
 
 ### 8. `run_workflow.py` (Orchestrator)
 
