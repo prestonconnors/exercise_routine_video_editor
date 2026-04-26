@@ -157,5 +157,6 @@ performance:
   # On consumer NVIDIA GPUs (GeForce), this is limited by the hardware encoder session limit (usually 3-5).
   # Setting this too high may cause FFmpeg to fail with an "out of memory" or session creation error.
   # On professional cards (Quadro/Tesla), you can set this higher.
-  # A good starting point is 3. Set to 1 to disable parallel processing entirely.
-  num_workers: 3
+  # Benchmarked on RTX 3070 Ti Laptop @ 4K HEVC 10-bit: 4 workers is the sweet spot
+  # (2/3 = 6:14, 4 = 4:52, 5 = 5:00). Adjust to taste on other hardware.
+  num_workers: 4

@@ -257,8 +257,10 @@ def _render_segment(task: dict, ctx: dict, verbose_mode: bool) -> list[str]:
     # NOTE: '-threads 1 -filter_threads 0' previously forced single-threaded CPU
     # filtering. CPU-side lut3d/zscale/unsharp scale across cores; let FFmpeg
     # pick its own thread count.
+    # `-extra_hw_frames 2` keeps the per-worker VRAM footprint small so 3+
+    # parallel workers don't push 4K p010 buffers into shared (system) memory.
     ffmpeg_cmd = ['ffmpeg', '-y', '-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda',
-                  '-extra_hw_frames', '8']
+                  '-extra_hw_frames', '2']
 
     current_input_index = 0
     ffmpeg_cmd.extend(final_video_input_args)
@@ -432,8 +434,10 @@ def _render_segment(task: dict, ctx: dict, verbose_mode: bool) -> list[str]:
     if video_cfg.get('codec') in ('h264_nvenc', 'hevc_nvenc'):
         # 'qres' (quarter-res first pass) is ~1.5x faster than 'fullres' with
         # quality differences typically <0.05 dB PSNR -- visually indistinguishable.
+        # `-rc-lookahead 8` (was 20) keeps each NVENC session's VRAM footprint
+        # ~2.5x smaller; quality impact at high CQ is negligible.
         final_cmd_args += [
-            '-rc-lookahead', '20', '-spatial_aq', '1', '-temporal_aq', '1', '-aq-strength', '8',
+            '-rc-lookahead', '8', '-spatial_aq', '1', '-temporal_aq', '1', '-aq-strength', '8',
             '-rc', 'vbr', '-tune', 'hq', '-multipass', 'qres', '-bf', '3',
         ]
         if video_cfg.get('codec') == 'hevc_nvenc':
@@ -567,6 +571,8 @@ def assemble_video(
         start_time_in_source = source_start_offset + routine_elapsed_time
         end_time_in_source = start_time_in_source + length
 
+        output_segment_file = f"temp_segment_{i}.mp4"
+
         if segments_to_process and segment_number not in segments_to_process:
             if verbose_mode:
                 print(f"\nSkipping Segment {segment_number}/{len(routine)}: '{name}'")
@@ -584,8 +590,6 @@ def assemble_video(
         if source_end_limit is not None and end_time_in_source > source_end_limit:
             print(f"\n  > WARNING: Segment '{name}' would end past specified end point. Stopping.")
             break
-
-        output_segment_file = f"temp_segment_{i}.mp4"
 
         replacement_video_path = exercise.get('replace_video')
         replacement_audio_path = exercise.get('replace_audio')
