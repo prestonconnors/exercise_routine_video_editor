@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 import yaml
 import textwrap
 import subprocess
@@ -62,13 +63,6 @@ def _load_manifest() -> dict:
         return {}
 
 
-def _save_manifest(manifest: dict) -> None:
-    Path(_MANIFEST_PATH).parent.mkdir(parents=True, exist_ok=True)
-    with _MANIFEST_LOCK:
-        with open(_MANIFEST_PATH, 'w', encoding='utf-8') as f:
-            json.dump(manifest, f, indent=2, sort_keys=True)
-
-
 def _update_manifest_entry(key: str, value: str) -> None:
     with _MANIFEST_LOCK:
         manifest = _load_manifest()
@@ -76,6 +70,23 @@ def _update_manifest_entry(key: str, value: str) -> None:
         Path(_MANIFEST_PATH).parent.mkdir(parents=True, exist_ok=True)
         with open(_MANIFEST_PATH, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, indent=2, sort_keys=True)
+
+
+def _prune_manifest(active_paths: set[str]) -> None:
+    """Drop manifest entries whose temp files no longer exist or are not in `active_paths`.
+
+    Prevents the manifest from accumulating stale keys (e.g. after a
+    single-segment finalize that moves the temp into the output path).
+    """
+    with _MANIFEST_LOCK:
+        manifest = _load_manifest()
+        before = len(manifest)
+        pruned = {k: v for k, v in manifest.items()
+                  if k in active_paths and os.path.exists(k) and os.path.getsize(k) > 0}
+        if len(pruned) != before:
+            Path(_MANIFEST_PATH).parent.mkdir(parents=True, exist_ok=True)
+            with open(_MANIFEST_PATH, 'w', encoding='utf-8') as f:
+                json.dump(pruned, f, indent=2, sort_keys=True)
 
 
 def _segment_fingerprint(payload: dict) -> str:
@@ -138,15 +149,12 @@ def optimize_final_audio(config_path: str, video_file_path: str, verbose: bool =
         print("  > FFmpeg error output (stderr):\n", e.stderr)
         sys.exit(1)
         
-    # Extract JSON from the messy stderr output
-    json_str = ""
-    for line in result.stderr.splitlines():
-        if line.strip().startswith('{'):
-            json_str = line
-            # In case the json is multi-line
-            json_str = result.stderr[result.stderr.find('{'):result.stderr.rfind('}')+1]
-            break
-            
+    # Extract the loudnorm JSON object from the messy stderr. We can't just
+    # slice from first '{' to last '}' because other filters may emit braces;
+    # find a brace block that contains the 'input_i' key instead.
+    json_match = re.search(r'\{[^{}]*"input_i"[^{}]*\}', result.stderr, re.DOTALL)
+    json_str = json_match.group(0) if json_match else ""
+
     if not json_str:
         print("\n--- FATAL: Could not find loudnorm JSON data in FFmpeg output. ---")
         print("  > FFmpeg output:\n", result.stderr)
@@ -326,9 +334,10 @@ def _render_segment(task: dict, ctx: dict, verbose_mode: bool) -> list[str]:
     ])
     if use_timer:
         pos = ring_cfg.get('position', {})
+        ring_size = ring_cfg.get('size', 600)
         timer_pix_fmt = 'yuva444p10le'
         filter_complex_chains.extend([
-            f"[{timer_input_index}:v]scale={ring_cfg['size']}:-1,format={timer_pix_fmt}[timer]",
+            f"[{timer_input_index}:v]scale={ring_size}:-1,format={timer_pix_fmt}[timer]",
             f"{last_stream}[timer]overlay=x='{pos.get('x', '(W-w)/2')}':y='{pos.get('y', '50')}'[with_timer]",
         ])
         last_stream = "[with_timer]"
@@ -549,12 +558,22 @@ def assemble_video(
         segment_number = i + 1
         name = exercise.get('name', '...').title()
         length = float(exercise.get('length', 0))
+        if length < 0:
+            print(f"\n  > WARNING: Segment {segment_number} '{name}' has negative length ({length}); treating as 0.")
+            length = 0.0
+        elif length > 0 and abs(length - round(length)) > 1e-6:
+            print(f"  > NOTE: Segment {segment_number} '{name}' has fractional length ({length}s). "
+                  f"Timer asset will be rounded to {int(length)}s.")
         start_time_in_source = source_start_offset + routine_elapsed_time
         end_time_in_source = start_time_in_source + length
 
         if segments_to_process and segment_number not in segments_to_process:
             if verbose_mode:
                 print(f"\nSkipping Segment {segment_number}/{len(routine)}: '{name}'")
+            # Still keep the existing temp in the concat list so the final
+            # video isn't truncated when the user only re-renders a subset.
+            if os.path.exists(output_segment_file) and os.path.getsize(output_segment_file) > 0:
+                tasks.append({'reuse': True, 'output': output_segment_file, 'i': i, 'name': name})
             routine_elapsed_time += length
             continue
         if length <= 0:
@@ -650,19 +669,12 @@ def assemble_video(
                 and os.path.getsize(output_segment_file) > 0
                 and manifest.get(output_segment_file) == fingerprint):
             print(f"\nReusing Segment {segment_number}/{len(routine)}: '{name}' (manifest hit)")
-            tasks.append({'reuse': True, 'output': output_segment_file, 'i': i})
+            tasks.append({'reuse': True, 'output': output_segment_file, 'i': i, 'name': name})
             routine_elapsed_time += length
             continue
-        # Legacy fallback: pre-manifest renders verified via ffprobe.
-        if (not force_render
-                and not manifest.get(output_segment_file)
-                and is_video_file_valid(output_segment_file)):
-            print(f"\nReusing Segment {segment_number}/{len(routine)}: '{name}' (legacy ffprobe check)")
-            # Record fingerprint so future runs use the fast manifest path.
-            _update_manifest_entry(output_segment_file, fingerprint)
-            tasks.append({'reuse': True, 'output': output_segment_file, 'i': i})
-            routine_elapsed_time += length
-            continue
+        # Pre-manifest renders are NOT reused: we can't verify their inputs
+        # match the current fingerprint, so persisting a stamp here could
+        # silently lock in a stale render forever. Force a re-encode instead.
 
         tasks.append({
             'reuse': False, 'i': i, 'segment_number': segment_number,
@@ -699,7 +711,7 @@ def assemble_video(
                 for line in lines:
                     print(line)
         else:
-            failures: list[tuple[dict, BaseException]] = []
+            failures: list[tuple[dict, Exception]] = []
             with ThreadPoolExecutor(max_workers=effective_workers) as ex:
                 future_to_task = {ex.submit(_render_segment, t, ctx, verbose_mode): t for t in work}
                 for fut in as_completed(future_to_task):
@@ -708,7 +720,7 @@ def assemble_video(
                         lines = fut.result()
                         for line in lines:
                             print(line)
-                    except BaseException as e:
+                    except Exception as e:
                         failures.append((t, e))
             if failures:
                 for t, e in failures:
@@ -716,6 +728,10 @@ def assemble_video(
                 sys.exit(1)
 
     segment_files = [t['output'] for t in tasks]
+
+    # Drop manifest entries we no longer reference (e.g., from prior runs that
+    # used a different routine length) so the cache doesn't grow forever.
+    _prune_manifest(set(segment_files))
 
     if not segment_files: sys.exit("\nNo segments were created.")
     if len(segment_files) == 1:
@@ -730,15 +746,24 @@ def assemble_video(
         # (loudness normalization will do the only audio re-encode after this).
         concat_cmd = [ 'ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_file, '-c', 'copy', output_path ]
         if verbose_mode: print("    - Running concat command:", " ".join(concat_cmd))
-        try: subprocess.run(concat_cmd, check=True, capture_output=not verbose_mode, text=True, encoding='utf-8'); print(f"  > Concatenation finished successfully.")
+        try:
+            subprocess.run(concat_cmd, check=True, capture_output=not verbose_mode, text=True, encoding='utf-8')
+            print("  > Concatenation finished successfully.")
         except subprocess.CalledProcessError as e:
-            if not verbose_mode: print("  > FFmpeg error output (stderr):", e.stderr); sys.exit(1)
+            if not verbose_mode:
+                print("  > FFmpeg error output (stderr):", e.stderr)
+            sys.exit(1)
         finally:
             if os.path.exists(concat_file): os.remove(concat_file)
 
     print("\n--- 🧹 Cleaning Up Temporary Files ---")
+    # Only delete temps that were freshly rendered this run. Reused temps must
+    # stay on disk so the next run can hit the manifest cache without
+    # re-encoding everything.
+    freshly_rendered = {t['output'] for t in tasks if not t.get('reuse')}
     for file in segment_files:
-        if os.path.exists(file): os.remove(file)
+        if file in freshly_rendered and os.path.exists(file):
+            os.remove(file)
     print(f"\n✅ Video assembly complete! Final video saved to: {output_path}")
     print(f"   Total time taken: {time.monotonic() - total_start_time:.2f} seconds.")
 
